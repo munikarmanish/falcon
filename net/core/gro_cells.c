@@ -34,9 +34,10 @@ drop:
 		goto unlock;
 	}
 
-	__skb_queue_tail(&cell->napi_skbs, skb);
-	if (skb_queue_len(&cell->napi_skbs) == 1)
-		napi_schedule(&cell->napi);
+	// __skb_queue_tail(&cell->napi_skbs, skb);
+	// if (skb_queue_len(&cell->napi_skbs) == 1)
+	// 	napi_schedule(&cell->napi);
+	netif_rx(skb);
 
 	res = NET_RX_SUCCESS;
 
