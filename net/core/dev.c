@@ -4394,29 +4394,42 @@ out_redir:
 }
 EXPORT_SYMBOL_GPL(do_xdp_generic);
 
-// u64 FALCON_CPUS = -1;
-// EXPORT_SYMBOL(FALCON_CPUS);
+int FALCON_CPUS[40] = {0};
+EXPORT_SYMBOL(FALCON_CPUS);
 
-static int get_falcon_cpu(const struct sk_buff *skb)
+int NR_FALCON_CPUS = 0;
+EXPORT_SYMBOL(NR_FALCON_CPUS);
+
+static int get_falcon_cpu(struct sk_buff *skb)
 {
-	int index;
+	int i;
 
-	index = ((skb_get_hash(skb) + skb->dev->ifindex)) % 10;
-
-	return (5 + index) << 1;
+	if (NR_FALCON_CPUS > 0) {
+		i = (skb_get_hash(skb) + skb->dev->ifindex) % NR_FALCON_CPUS;
+		return FALCON_CPUS[i];
+	} else {
+		return (skb_get_hash(skb) + skb->dev->ifindex) % nr_cpu_ids;
+	}
 }
 
 static int netif_rx_internal(struct sk_buff *skb)
 {
 	int ret;
 	unsigned int qtail = 0;
-	int cpu;
 
 	net_timestamp_check(netdev_tstamp_prequeue, skb);
 
 	trace_netif_rx(skb);
 
-/*
+	if (NR_FALCON_CPUS > 0) {
+		preempt_disable();
+		rcu_read_lock();
+		ret = enqueue_to_backlog(skb, get_falcon_cpu(skb), &qtail);
+		rcu_read_unlock();
+		preempt_enable();
+		return ret;
+	}
+
 #ifdef CONFIG_RPS
 	if (static_branch_unlikely(&rps_needed)) {
 		struct rps_dev_flow voidflow, *rflow = &voidflow;
@@ -4441,13 +4454,6 @@ static int netif_rx_internal(struct sk_buff *skb)
 		ret = enqueue_to_backlog(skb, get_cpu(), &qtail);
 		put_cpu();
 	}
-*/
-
-	preempt_disable();
-	rcu_read_lock();
-	ret = enqueue_to_backlog(skb, get_falcon_cpu(skb), &qtail);
-	rcu_read_unlock();
-	preempt_enable();
 
 	return ret;
 }

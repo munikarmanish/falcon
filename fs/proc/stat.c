@@ -21,6 +21,9 @@
 #define arch_irq_stat() 0
 #endif
 
+extern int FALCON_CPUS[40];
+extern int NR_FALCON_CPUS;
+
 #ifdef arch_idle_time
 
 static u64 get_idle_time(struct kernel_cpustat *kcs, int cpu)
@@ -224,9 +227,66 @@ static const struct file_operations proc_stat_operations = {
 	.release	= single_release,
 };
 
+static int falcon_cpus_show(struct seq_file *f, void *v)
+{
+	u64 falcon_cpu_map = 0;
+	int i;
+
+	for (i = 0; i < NR_FALCON_CPUS; i++) {
+		falcon_cpu_map |= (1ull << FALCON_CPUS[i]);
+	}
+	seq_printf(f, "%llx\n", falcon_cpu_map);
+	return 0;
+}
+
+static int falcon_cpus_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, falcon_cpus_show, NULL);
+}
+
+static ssize_t falcon_cpus_write(struct file *file, const char __user *ubuf,
+				 size_t size, loff_t *pos)
+{
+	char buf[101];
+	int len, i;
+	u64 falcon_cpu_map;
+
+	if (*pos > 0 || size > 100)
+		return -EFAULT;
+	if (copy_from_user(buf, ubuf, size))
+		return -EFAULT;
+	if (sscanf(buf, "%llx", &falcon_cpu_map) != 1)
+		return -EFAULT;
+
+	len = strlen(buf);
+	*pos = len;
+
+	// fill the FALCON_CPUS array
+	NR_FALCON_CPUS = 0;
+	for (i = 0; i < nr_cpu_ids; i++) {
+		// check the bit
+		if (falcon_cpu_map & 1) {
+			FALCON_CPUS[NR_FALCON_CPUS] = i;
+			NR_FALCON_CPUS++;
+		}
+		falcon_cpu_map >>= 1;
+	}
+
+	return len;
+}
+
+static const struct file_operations falcon_cpus_ops = {
+	.open		= falcon_cpus_open,
+	.read		= seq_read,
+	.write		= falcon_cpus_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static int __init proc_stat_init(void)
 {
 	proc_create("stat", 0, NULL, &proc_stat_operations);
+	proc_create("falcon_cpus", 0666, NULL, &falcon_cpus_ops);
 	return 0;
 }
 fs_initcall(proc_stat_init);
