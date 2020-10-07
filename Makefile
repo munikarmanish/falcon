@@ -2,7 +2,7 @@
 VERSION = 5
 PATCHLEVEL = 4
 SUBLEVEL =
-EXTRAVERSION = parallel
+EXTRAVERSION = falcon
 NAME = Kleptomaniac Octopus
 
 # *DOCUMENTATION*

@@ -4400,15 +4400,22 @@ EXPORT_SYMBOL(FALCON_CPUS);
 int NR_FALCON_CPUS = 0;
 EXPORT_SYMBOL(NR_FALCON_CPUS);
 
+u8 FALCON_STRESS = 0;
+EXPORT_SYMBOL(FALCON_STRESS);
+
 static int get_falcon_cpu(struct sk_buff *skb)
 {
 	int i;
 
-	if (NR_FALCON_CPUS > 0) {
-		i = (skb_get_hash(skb) + skb->dev->ifindex) % NR_FALCON_CPUS;
+	if (!NR_FALCON_CPUS)
+		return (skb_get_hash(skb) + skb->dev->ifindex) % nr_cpu_ids;
+
+	if (FALCON_STRESS) {
+		i = skb->dev->ifindex % NR_FALCON_CPUS;
 		return FALCON_CPUS[i];
 	} else {
-		return (skb_get_hash(skb) + skb->dev->ifindex) % nr_cpu_ids;
+		i = (skb_get_hash(skb) + skb->dev->ifindex) % NR_FALCON_CPUS;
+		return FALCON_CPUS[i];
 	}
 }
 
