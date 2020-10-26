@@ -6347,6 +6347,20 @@ out_unlock:
 	return work;
 }
 
+struct napi_struct *get_next_napi(struct list_head *list)
+{
+	struct napi_struct *n;
+
+	/* search for backlog device */
+	list_for_each_entry(n, list, poll_list) {
+		if (n->napi_type == NAPI_BACKLOG)
+			return n;
+	}
+
+	/* otherwise, return the first napi device */
+	return list_first_entry(list, typeof(*n), poll_list);
+}
+
 static __latent_entropy void net_rx_action(struct softirq_action *h)
 {
 	struct softnet_data *sd = this_cpu_ptr(&softnet_data);
@@ -6356,12 +6370,13 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
 	LIST_HEAD(list);
 	LIST_HEAD(repoll);
 
-	local_irq_disable();
-	list_splice_init(&sd->poll_list, &list);
-	local_irq_enable();
 
 	for (;;) {
 		struct napi_struct *n;
+
+		local_irq_disable();
+		list_splice_init(&sd->poll_list, &list);
+		local_irq_enable();
 
 		if (list_empty(&list)) {
 			if (!sd_has_rps_ipi_waiting(sd) && list_empty(&repoll))
@@ -6369,8 +6384,10 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
 			break;
 		}
 
-		n = list_first_entry(&list, struct napi_struct, poll_list);
-		budget -= napi_poll(n, &repoll);
+		// n = list_first_entry(&list, struct napi_struct, poll_list);
+		n = get_next_napi(&list);
+		// budget -= napi_poll(n, &repoll);
+		budget -= napi_poll(n, &list);
 
 		/* If softirq window is exhausted then punt.
 		 * Allow this to run for 2 jiffies since which will allow
@@ -6386,7 +6403,7 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
 	local_irq_disable();
 
 	list_splice_tail_init(&sd->poll_list, &list);
-	list_splice_tail(&repoll, &list);
+	// list_splice_tail(&repoll, &list);
 	list_splice(&list, &sd->poll_list);
 	if (!list_empty(&sd->poll_list))
 		__raise_softirq_irqoff(NET_RX_SOFTIRQ);
@@ -10213,6 +10230,7 @@ static int __init net_dev_init(void)
 
 		init_gro_hash(&sd->backlog);
 		sd->backlog.poll = process_backlog;
+		sd->backlog.napi_type = NAPI_BACKLOG;
 		sd->backlog.weight = weight_p;
 	}
 

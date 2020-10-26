@@ -312,6 +312,13 @@ struct gro_list {
  */
 #define GRO_HASH_BUCKETS	8
 
+enum napi_type {
+	NAPI_NONE,
+	NAPI_PHYSICAL,
+	NAPI_BRIDGE,
+	NAPI_BACKLOG,
+};
+
 /*
  * Structure for NAPI scheduling similar to tasklet but with weighting
  */
@@ -328,6 +335,7 @@ struct napi_struct {
 	int			weight;
 	unsigned long		gro_bitmask;
 	int			(*poll)(struct napi_struct *, int);
+	int			napi_type;
 #ifdef CONFIG_NETPOLL
 	int			poll_owner;
 #endif
