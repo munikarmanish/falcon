@@ -31,6 +31,7 @@
  */
 
 #include <linux/irq.h>
+#include <linux/netdevice.h>
 #include "en.h"
 #include "en/xdp.h"
 #include "en/xsk/rx.h"
@@ -120,6 +121,9 @@ int mlx5e_napi_poll(struct napi_struct *napi, int budget)
 	bool busy = false;
 	int work_done = 0;
 	int i;
+
+	// update the napi quota
+	napi->weight = napi_quota;
 
 	ch_stats->poll++;
 

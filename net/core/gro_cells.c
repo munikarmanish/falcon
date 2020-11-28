@@ -53,6 +53,8 @@ static int gro_cell_poll(struct napi_struct *napi, int budget)
 	struct sk_buff *skb;
 	int work_done = 0;
 
+	napi->weight = dev_rx_weight;
+
 	while (work_done < budget) {
 		skb = __skb_dequeue(&cell->napi_skbs);
 		if (!skb)
@@ -81,8 +83,7 @@ int gro_cells_init(struct gro_cells *gcells, struct net_device *dev)
 
 		set_bit(NAPI_STATE_NO_BUSY_POLL, &cell->napi.state);
 
-		netif_napi_add(dev, &cell->napi, gro_cell_poll,
-			       NAPI_POLL_WEIGHT);
+		netif_napi_add(dev, &cell->napi, gro_cell_poll, dev_rx_weight);
 		napi_enable(&cell->napi);
 	}
 	return 0;

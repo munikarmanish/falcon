@@ -3870,6 +3870,9 @@ int dev_rx_weight __read_mostly = 64;
 int dev_tx_weight __read_mostly = 64;
 /* Maximum number of GRO_NORMAL skbs to batch up for list-RX */
 int gro_normal_batch __read_mostly = 8;
+int napi_quota = 1;
+
+EXPORT_SYMBOL(napi_quota);
 
 /* Called with irq disabled */
 static inline void ____napi_schedule(struct softnet_data *sd,
@@ -6367,19 +6370,16 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
 	unsigned long time_limit = jiffies +
 		usecs_to_jiffies(netdev_budget_usecs);
 	int budget = netdev_budget;
+	struct napi_struct *n;
 	LIST_HEAD(list);
-	LIST_HEAD(repoll);
-
 
 	for (;;) {
-		struct napi_struct *n;
-
 		local_irq_disable();
 		list_splice_init(&sd->poll_list, &list);
 		local_irq_enable();
 
 		if (list_empty(&list)) {
-			if (!sd_has_rps_ipi_waiting(sd) && list_empty(&repoll))
+			if (!sd_has_rps_ipi_waiting(sd))
 				goto out;
 			break;
 		}
@@ -6403,7 +6403,6 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
 	local_irq_disable();
 
 	list_splice_tail_init(&sd->poll_list, &list);
-	// list_splice_tail(&repoll, &list);
 	list_splice(&list, &sd->poll_list);
 	if (!list_empty(&sd->poll_list))
 		__raise_softirq_irqoff(NET_RX_SOFTIRQ);

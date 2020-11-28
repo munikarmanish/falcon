@@ -1999,8 +1999,7 @@ static int mlx5e_open_channel(struct mlx5e_priv *priv, int ix,
 	if (err)
 		goto err_free_channel;
 
-	// netif_napi_add(netdev, &c->napi, mlx5e_napi_poll, 64);
-	netif_napi_add(netdev, &c->napi, mlx5e_napi_poll, 1);
+	netif_napi_add(netdev, &c->napi, mlx5e_napi_poll, napi_quota);
 
 	err = mlx5e_open_queues(c, params, cparam);
 	if (unlikely(err))

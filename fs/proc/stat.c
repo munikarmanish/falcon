@@ -21,6 +21,8 @@
 #define arch_irq_stat() 0
 #endif
 
+extern int	napi_quota;
+
 #ifdef arch_idle_time
 
 static u64 get_idle_time(struct kernel_cpustat *kcs, int cpu)
@@ -224,9 +226,50 @@ static const struct file_operations proc_stat_operations = {
 	.release	= single_release,
 };
 
+static int quota_show(struct seq_file *f, void *v)
+{
+	seq_printf(f, "%d\n", napi_quota);
+	return 0;
+}
+
+static int quota_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, quota_show, NULL);
+}
+
+static ssize_t quota_write(struct file *file, const char __user *ubuf,
+				 size_t size, loff_t *pos)
+{
+	char buf[101];
+	int len;
+
+	if (*pos > 0 || size > 100)
+		return -EFAULT;
+	if (copy_from_user(buf, ubuf, size))
+		return -EFAULT;
+	if (sscanf(buf, "%d", &napi_quota) < 1)
+		return -EFAULT;
+
+	len = strlen(buf);
+	*pos = len;
+	return len;
+}
+
+static const struct file_operations quota_ops = {
+	.open		= quota_open,
+	.read		= seq_read,
+	.write		= quota_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static int __init proc_stat_init(void)
 {
 	proc_create("stat", 0, NULL, &proc_stat_operations);
+
+	// added by manish
+	proc_create("quota", 0666, NULL, &quota_ops);
+
 	return 0;
 }
 fs_initcall(proc_stat_init);
