@@ -8,6 +8,7 @@
 
 struct gro_cell {
 	struct sk_buff_head	napi_skbs;
+	// struct sk_buff_head	napi_skbs_priority;
 	struct napi_struct	napi;
 };
 
@@ -62,13 +63,11 @@ drop:
 		goto unlock;
 	}
 
-	if ((skb->high_priority = skb_is_high_priority(skb))) {
-		napi_gro_receive(&cell->napi, skb);
-	} else {
-		__skb_queue_tail(&cell->napi_skbs, skb);
-		if (skb_queue_len(&cell->napi_skbs) == 1)
-			napi_schedule(&cell->napi);
-	}
+	skb->high_priority = skb_is_high_priority(skb);
+
+	__skb_queue_tail(&cell->napi_skbs, skb);
+	if (skb_queue_len(&cell->napi_skbs) == 1)
+		napi_schedule(&cell->napi);
 
 	res = NET_RX_SUCCESS;
 
@@ -110,6 +109,7 @@ int gro_cells_init(struct gro_cells *gcells, struct net_device *dev)
 		struct gro_cell *cell = per_cpu_ptr(gcells->cells, i);
 
 		__skb_queue_head_init(&cell->napi_skbs);
+		// __skb_queue_head_init(&cell->napi_skbs_priority);
 
 		set_bit(NAPI_STATE_NO_BUSY_POLL, &cell->napi.state);
 

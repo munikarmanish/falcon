@@ -2981,6 +2981,7 @@ extern int netdev_flow_limit_table_len;
 struct softnet_data {
 	struct list_head	poll_list;
 	struct sk_buff_head	process_queue;
+	struct sk_buff_head	process_queue_priority;
 
 	/* stats */
 	unsigned int		processed;
@@ -3017,6 +3018,7 @@ struct softnet_data {
 #endif
 	unsigned int		dropped;
 	struct sk_buff_head	input_pkt_queue;
+	struct sk_buff_head	input_pkt_queue_priority;
 	struct napi_struct	backlog;
 
 };

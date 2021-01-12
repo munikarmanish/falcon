@@ -3879,6 +3879,13 @@ static inline void ____napi_schedule(struct softnet_data *sd,
 	__raise_softirq_irqoff(NET_RX_SOFTIRQ);
 }
 
+static inline void ____napi_schedule_priority(struct softnet_data *sd,
+					      struct napi_struct *napi)
+{
+	list_del_init(&napi->poll_list);
+	list_add(&napi->poll_list, &sd->poll_list);
+}
+
 #ifdef CONFIG_RPS
 
 /* One global table that all flow-based protocols share. */
@@ -4167,25 +4174,52 @@ static int enqueue_to_backlog(struct sk_buff *skb, int cpu,
 	rps_lock(sd);
 	if (!netif_running(skb->dev))
 		goto drop;
-	qlen = skb_queue_len(&sd->input_pkt_queue);
-	if (qlen <= netdev_max_backlog && !skb_flow_limit(skb, qlen)) {
-		if (qlen) {
-enqueue:
-			__skb_queue_tail(&sd->input_pkt_queue, skb);
-			input_queue_tail_incr_save(sd, qtail);
-			rps_unlock(sd);
-			local_irq_restore(flags);
-			return NET_RX_SUCCESS;
-		}
+	if (skb->high_priority) {
+		qlen = skb_queue_len(&sd->input_pkt_queue_priority);
+		if (qlen <= netdev_max_backlog && !skb_flow_limit(skb, qlen)) {
+			if (qlen) {
+enqueue_priority:
+				__skb_queue_tail(&sd->input_pkt_queue_priority,
+						 skb);
+				input_queue_tail_incr_save(sd, qtail);
+				rps_unlock(sd);
+				local_irq_restore(flags);
+				return NET_RX_SUCCESS;
+			}
 
-		/* Schedule NAPI for backlog device
-		 * We can use non atomic operation since we own the queue lock
-		 */
-		if (!__test_and_set_bit(NAPI_STATE_SCHED, &sd->backlog.state)) {
-			if (!rps_ipi_queued(sd))
-				____napi_schedule(sd, &sd->backlog);
+			/* Schedule NAPI for backlog device
+			 * We can use non atomic operation since we own the queue lock
+			 */
+			if (!__test_and_set_bit(NAPI_STATE_SCHED, &sd->backlog.state)) {
+				if (!rps_ipi_queued(sd))
+					____napi_schedule(sd, &sd->backlog);
+			}
+
+			if (!list_is_first(&(sd->backlog.poll_list), &(sd->poll_list)))
+				____napi_schedule_priority(sd, &sd->backlog);
+			goto enqueue_priority;
 		}
-		goto enqueue;
+	} else {
+		qlen = skb_queue_len(&sd->input_pkt_queue);
+		if (qlen <= netdev_max_backlog && !skb_flow_limit(skb, qlen)) {
+			if (qlen) {
+enqueue:
+				__skb_queue_tail(&sd->input_pkt_queue, skb);
+				input_queue_tail_incr_save(sd, qtail);
+				rps_unlock(sd);
+				local_irq_restore(flags);
+				return NET_RX_SUCCESS;
+			}
+
+			/* Schedule NAPI for backlog device
+			 * We can use non atomic operation since we own the queue lock
+			 */
+			if (!__test_and_set_bit(NAPI_STATE_SCHED, &sd->backlog.state)) {
+				if (!rps_ipi_queued(sd))
+					____napi_schedule(sd, &sd->backlog);
+			}
+			goto enqueue;
+		}
 	}
 
 drop:
@@ -4402,33 +4436,29 @@ static int netif_rx_internal(struct sk_buff *skb)
 
 	trace_netif_rx(skb);
 
-	if (skb->high_priority) {
-		ret = netif_receive_skb(skb);
-	} else {
 #ifdef CONFIG_RPS
-		if (static_branch_unlikely(&rps_needed)) {
-			struct rps_dev_flow voidflow, *rflow = &voidflow;
-			int cpu;
+	if (static_branch_unlikely(&rps_needed)) {
+		struct rps_dev_flow voidflow, *rflow = &voidflow;
+		int cpu;
 
-			preempt_disable();
-			rcu_read_lock();
+		preempt_disable();
+		rcu_read_lock();
 
-			cpu = get_rps_cpu(skb->dev, skb, &rflow);
-			if (cpu < 0)
-				cpu = smp_processor_id();
+		cpu = get_rps_cpu(skb->dev, skb, &rflow);
+		if (cpu < 0)
+			cpu = smp_processor_id();
 
-			ret = enqueue_to_backlog(skb, cpu, &rflow->last_qtail);
+		ret = enqueue_to_backlog(skb, cpu, &rflow->last_qtail);
 
-			rcu_read_unlock();
-			preempt_enable();
-		} else
+		rcu_read_unlock();
+		preempt_enable();
+	} else
 #endif
-		{
-			unsigned int qtail;
+	{
+		unsigned int qtail;
 
-			ret = enqueue_to_backlog(skb, get_cpu(), &qtail);
-			put_cpu();
-		}
+		ret = enqueue_to_backlog(skb, get_cpu(), &qtail);
+		put_cpu();
 	}
 	return ret;
 }
@@ -5853,6 +5883,8 @@ static int process_backlog(struct napi_struct *napi, int quota)
 	struct softnet_data *sd = container_of(napi, struct softnet_data, backlog);
 	bool again = true;
 	int work = 0;
+	unsigned long flags;
+	struct sk_buff *skb;
 
 	/* Check if we have pending ipi, its better to send them now,
 	 * not waiting net_rx_action() end.
@@ -5863,9 +5895,55 @@ static int process_backlog(struct napi_struct *napi, int quota)
 	}
 
 	napi->weight = dev_rx_weight;
-	while (again) {
-		struct sk_buff *skb;
 
+	/* first try to process priority queue */
+	while (again) {
+		while ((skb = __skb_dequeue(&sd->process_queue_priority))) {
+			rcu_read_lock();
+			__netif_receive_skb(skb);
+			rcu_read_unlock();
+			input_queue_head_incr(sd);
+			// if (++work >= quota)
+			// 	return work;
+		}
+		local_irq_disable();
+		rps_lock(sd);
+		if (skb_queue_empty(&sd->input_pkt_queue_priority)) {
+			/*
+			 * Inline a custom version of __napi_complete().
+			 * only current cpu owns and manipulates this napi,
+			 * and NAPI_STATE_SCHED is the only possible flag set
+			 * on backlog.
+			 * We can use a plain write instead of clear_bit(),
+			 * and we dont need an smp_mb() memory barrier.
+			 */
+			// napi->state = 0;
+			again = false;
+		} else {
+			skb_queue_splice_tail_init(
+				&sd->input_pkt_queue_priority,
+				&sd->process_queue_priority);
+		}
+		rps_unlock(sd);
+		local_irq_enable();
+	}
+
+	/* if we processed priority packet, requeue this device to normal queue and leave */
+	if (work > 0) {
+		local_irq_save(flags);
+		rps_lock(sd);
+		if (!__test_and_set_bit(NAPI_STATE_SCHED, &sd->backlog.state)) {
+			if (!rps_ipi_queued(sd))
+				____napi_schedule(sd, &sd->backlog);
+		}
+		rps_unlock(sd);
+		local_irq_restore(flags);
+		return work;
+	}
+
+	/* process the normal queue */
+	again = true;
+	while (again) {
 		while ((skb = __skb_dequeue(&sd->process_queue))) {
 			rcu_read_lock();
 			__netif_receive_skb(skb);
@@ -5873,7 +5951,6 @@ static int process_backlog(struct napi_struct *napi, int quota)
 			input_queue_head_incr(sd);
 			if (++work >= quota)
 				return work;
-
 		}
 
 		local_irq_disable();
@@ -6292,7 +6369,7 @@ static int napi_poll(struct napi_struct *n, struct list_head *repoll)
 	void *have;
 	int work, weight;
 
-	list_del_init(&n->poll_list);
+	// list_del_init(&n->poll_list);
 
 	have = netpoll_poll_lock(n);
 
@@ -6310,7 +6387,7 @@ static int napi_poll(struct napi_struct *n, struct list_head *repoll)
 		trace_napi_poll(n, work, weight);
 	}
 
-	WARN_ON_ONCE(work > weight);
+	// WARN_ON_ONCE(work > weight);
 
 	if (likely(work < weight))
 		goto out_unlock;
@@ -6343,7 +6420,8 @@ static int napi_poll(struct napi_struct *n, struct list_head *repoll)
 		goto out_unlock;
 	}
 
-	list_add_tail(&n->poll_list, repoll);
+	if (list_empty(&n->poll_list))
+		list_add_tail(&n->poll_list, repoll);
 
 out_unlock:
 	netpoll_poll_unlock(have);
@@ -6357,23 +6435,25 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
 	unsigned long time_limit = jiffies +
 		usecs_to_jiffies(netdev_budget_usecs);
 	int budget = netdev_budget;
-	LIST_HEAD(list);
+	struct napi_struct *n;
 	LIST_HEAD(repoll);
 
-	local_irq_disable();
-	list_splice_init(&sd->poll_list, &list);
-	local_irq_enable();
-
 	for (;;) {
-		struct napi_struct *n;
+		local_irq_disable();
+		list_splice_tail_init(&repoll, &sd->poll_list);
+		n = list_first_entry_or_null(&sd->poll_list, struct napi_struct, poll_list);
+		if (n)
+			list_del_init(&n->poll_list);
+		local_irq_enable();
 
-		if (list_empty(&list)) {
-			if (!sd_has_rps_ipi_waiting(sd) && list_empty(&repoll))
+		// if (list_empty(&list)) {
+		if (!n) {
+			if (!sd_has_rps_ipi_waiting(sd))
 				goto out;
 			break;
 		}
 
-		n = list_first_entry(&list, struct napi_struct, poll_list);
+		// n = list_first_entry(&list, struct napi_struct, poll_list);
 		budget -= napi_poll(n, &repoll);
 
 		/* If softirq window is exhausted then punt.
@@ -6389,9 +6469,8 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
 
 	local_irq_disable();
 
-	list_splice_tail_init(&sd->poll_list, &list);
-	list_splice_tail(&repoll, &list);
-	list_splice(&list, &sd->poll_list);
+	// list_splice_tail_init(&sd->poll_list, &list);
+	list_splice_tail(&repoll, &sd->poll_list);
 	if (!list_empty(&sd->poll_list))
 		__raise_softirq_irqoff(NET_RX_SOFTIRQ);
 
@@ -10204,6 +10283,8 @@ static int __init net_dev_init(void)
 
 		skb_queue_head_init(&sd->input_pkt_queue);
 		skb_queue_head_init(&sd->process_queue);
+		skb_queue_head_init(&sd->input_pkt_queue_priority);
+		skb_queue_head_init(&sd->process_queue_priority);
 #ifdef CONFIG_XFRM_OFFLOAD
 		skb_queue_head_init(&sd->xfrm_backlog);
 #endif
