@@ -5994,6 +5994,19 @@ void __napi_schedule(struct napi_struct *n)
 }
 EXPORT_SYMBOL(__napi_schedule);
 
+void __napi_schedule_priority(struct napi_struct *n)
+{
+	struct softnet_data *sd = this_cpu_ptr(&softnet_data);
+	unsigned long flags;
+
+	local_irq_save(flags);
+	____napi_schedule(sd, n);
+	list_del_init(&n->poll_list);
+	list_add(&n->poll_list, &sd->poll_list);
+	local_irq_restore(flags);
+}
+EXPORT_SYMBOL(__napi_schedule_priority);
+
 /**
  *	napi_schedule_prep - check if napi can be scheduled
  *	@n: napi context

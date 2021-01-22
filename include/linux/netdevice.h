@@ -423,6 +423,7 @@ typedef enum rx_handler_result rx_handler_result_t;
 typedef rx_handler_result_t rx_handler_func_t(struct sk_buff **pskb);
 
 void __napi_schedule(struct napi_struct *n);
+void __napi_schedule_priority(struct napi_struct *n);
 void __napi_schedule_irqoff(struct napi_struct *n);
 
 static inline bool napi_disable_pending(struct napi_struct *n)
@@ -443,6 +444,12 @@ static inline void napi_schedule(struct napi_struct *n)
 {
 	if (napi_schedule_prep(n))
 		__napi_schedule(n);
+}
+
+static inline void napi_schedule_priority(struct napi_struct *n)
+{
+	if (napi_schedule_prep(n))
+		__napi_schedule_priority(n);
 }
 
 /**

@@ -5,10 +5,11 @@
 #include <net/gro_cells.h>
 #include <uapi/linux/ip.h>
 #include <uapi/linux/udp.h>
+#include <linux/list.h>
 
 struct gro_cell {
 	struct sk_buff_head	napi_skbs;
-	// struct sk_buff_head	napi_skbs_priority;
+	struct sk_buff_head	napi_skbs_priority;
 	struct napi_struct	napi;
 };
 
@@ -64,10 +65,14 @@ drop:
 	}
 
 	skb->high_priority = skb_is_high_priority(skb);
+	if (skb->high_priority) {
+		netif_rx(skb);
+	} else {
+		__skb_queue_tail(&cell->napi_skbs, skb);
+		if (skb_queue_len(&cell->napi_skbs) == 1)
+			napi_schedule(&cell->napi);
+	}
 
-	__skb_queue_tail(&cell->napi_skbs, skb);
-	if (skb_queue_len(&cell->napi_skbs) == 1)
-		napi_schedule(&cell->napi);
 
 	res = NET_RX_SUCCESS;
 
@@ -84,6 +89,22 @@ static int gro_cell_poll(struct napi_struct *napi, int budget)
 	struct sk_buff *skb;
 	int work_done = 0;
 
+	/* priority loop */
+	for (;;) {
+		skb = __skb_dequeue(&cell->napi_skbs_priority);
+		if (!skb)
+			break;
+		napi_gro_receive(napi, skb);
+		work_done++;
+	}
+
+	if (work_done > 0) {
+		napi->state |= NAPI_STATE_SCHED;
+		__napi_schedule(napi);
+		return work_done;
+	}
+
+	/* normal loop */
 	while (work_done < budget) {
 		skb = __skb_dequeue(&cell->napi_skbs);
 		if (!skb)
@@ -109,7 +130,7 @@ int gro_cells_init(struct gro_cells *gcells, struct net_device *dev)
 		struct gro_cell *cell = per_cpu_ptr(gcells->cells, i);
 
 		__skb_queue_head_init(&cell->napi_skbs);
-		// __skb_queue_head_init(&cell->napi_skbs_priority);
+		__skb_queue_head_init(&cell->napi_skbs_priority);
 
 		set_bit(NAPI_STATE_NO_BUSY_POLL, &cell->napi.state);
 
