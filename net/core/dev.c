@@ -143,6 +143,7 @@
 #include <linux/net_namespace.h>
 #include <linux/indirect_call_wrapper.h>
 #include <net/devlink.h>
+#include <linux/kernel_stat.h>
 
 #include "net-sysfs.h"
 
@@ -4405,18 +4406,26 @@ EXPORT_SYMBOL(FALCON_STRESS);
 
 static int get_falcon_cpu(struct sk_buff *skb)
 {
-	int i;
+	struct rps_dev_flow voidflow, *rflow = &voidflow;
+	int i, c = get_rps_cpu(skb->dev, skb, &rflow);
 
-	if (!NR_FALCON_CPUS)
-		return (skb_get_hash(skb) + skb->dev->ifindex) % nr_cpu_ids;
+	if (NR_FALCON_CPUS == 0)	// if FALCON is disabled
+		return c;
 
-	if (FALCON_STRESS) {
-		i = skb->dev->ifindex % NR_FALCON_CPUS;
-		return FALCON_CPUS[i];
-	} else {
-		i = (skb_get_hash(skb) + skb->dev->ifindex) % NR_FALCON_CPUS;
-		return FALCON_CPUS[i];
-	}
+	// if (!kcpustat_cpu(c).high) 	// if RPS core is LOW
+	// 	return c;
+
+	// // first option
+	// i = FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
+	// if (!kcpustat_cpu(i).high)
+	// 	return i;
+
+	// // second option
+	// i = FALCON_CPUS[(c + (skb->dev->ifindex>>1)) % NR_FALCON_CPUS];
+	// if (!kcpustat_cpu(i).high)
+	// 	return i;
+
+	return c;  // if all are HIGH
 }
 
 static int netif_rx_internal(struct sk_buff *skb)
@@ -4428,7 +4437,7 @@ static int netif_rx_internal(struct sk_buff *skb)
 
 	trace_netif_rx(skb);
 
-	if (NR_FALCON_CPUS > 0) {
+	if (NR_FALCON_CPUS > 0) { // FALCON is enabled
 		preempt_disable();
 		rcu_read_lock();
 		ret = enqueue_to_backlog(skb, get_falcon_cpu(skb), &qtail);

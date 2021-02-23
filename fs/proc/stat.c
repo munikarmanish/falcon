@@ -24,6 +24,7 @@
 extern int FALCON_CPUS[40];
 extern int NR_FALCON_CPUS;
 extern u8 FALCON_STRESS;
+extern int CPUSTAT_INTERVAL;
 
 #ifdef arch_idle_time
 
@@ -290,10 +291,77 @@ static const struct file_operations falcon_cpus_ops = {
 	.release	= single_release,
 };
 
+static int cpustat_show(struct seq_file *f, void *v)
+{
+	seq_printf(f, "%d\n", CPUSTAT_INTERVAL);
+	return 0;
+}
+
+static int cpustat_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, cpustat_show, NULL);
+}
+
+static ssize_t cpustat_write(struct file *file, const char __user *ubuf,
+			     size_t size, loff_t *pos)
+{
+	char buf[101];
+	char s[101] = "";
+	int len, i;
+
+	if (*pos > 0 || size > 100)
+		return -EFAULT;
+	if (copy_from_user(buf, ubuf, size))
+		return -EFAULT;
+	if (sscanf(buf, "%d", &CPUSTAT_INTERVAL) != 1)
+		return -EFAULT;
+
+	len = strlen(buf);
+	*pos = len;
+	return len;
+}
+
+static const struct file_operations cpustat_ops = {
+	.open		= cpustat_open,
+	.read		= seq_read,
+	.write		= cpustat_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+static int loads_show(struct seq_file *f, void *v)
+{
+	int cpu = 0;
+	char c;
+
+	for_each_online_cpu(cpu) {
+		c = kcpustat_cpu(cpu).high? '|' : '.';
+		seq_putc(f, c);
+	}
+	seq_putc(f, '\n');
+
+	return 0;
+}
+
+static int loads_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, loads_show, NULL);
+}
+
+static const struct file_operations loads_ops = {
+	.open		= loads_open,
+	.read		= seq_read,
+	// .write		= loads_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static int __init proc_stat_init(void)
 {
 	proc_create("stat", 0, NULL, &proc_stat_operations);
 	proc_create("falcon_cpus", 0666, NULL, &falcon_cpus_ops);
+	proc_create("cpustat_interval", 0666, NULL, &cpustat_ops);
+	proc_create("loads", 0444, NULL, &loads_ops);
 	return 0;
 }
 fs_initcall(proc_stat_init);
