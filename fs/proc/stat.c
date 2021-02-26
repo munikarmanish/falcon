@@ -249,7 +249,6 @@ static ssize_t falcon_cpus_write(struct file *file, const char __user *ubuf,
 				 size_t size, loff_t *pos)
 {
 	char buf[101];
-	char s[101] = "";
 	int len, i;
 	u64 falcon_cpu_map;
 
@@ -303,8 +302,7 @@ static ssize_t cpustat_write(struct file *file, const char __user *ubuf,
 			     size_t size, loff_t *pos)
 {
 	char buf[101];
-	char s[101] = "";
-	int len, i;
+	int len;
 
 	if (*pos > 0 || size > 100)
 		return -EFAULT;
@@ -332,7 +330,7 @@ static int loads_show(struct seq_file *f, void *v)
 	char c;
 
 	for_each_online_cpu(cpu) {
-		c = kcpustat_cpu(cpu).high? '|' : '.';
+		c = kcpustat_cpu(cpu).load >= 90? '|' : '.';
 		seq_putc(f, c);
 	}
 	seq_putc(f, '\n');

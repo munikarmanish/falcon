@@ -4403,6 +4403,7 @@ EXPORT_SYMBOL(NR_FALCON_CPUS);
 
 static inline int get_falcon_cpu(struct sk_buff *skb)
 {
+	u8 load = 0, lowest_load = 90;
 	struct rps_dev_flow voidflow, *rflow = &voidflow;
 	int i, c = get_rps_cpu(skb->dev, skb, &rflow);
 	if (c < 0)
@@ -4411,18 +4412,24 @@ static inline int get_falcon_cpu(struct sk_buff *skb)
 	if (NR_FALCON_CPUS == 0)	// if FALCON is disabled
 		return c;
 
-	if (!kcpustat_cpu(c).high) 	// if RPS core is LOW
+	if (kcpustat_cpu(c).load < 90) 	// if RPS core is LOW
 		return c;
 
 	// first option
 	i = FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
-	if (!kcpustat_cpu(i).high)
-		return i;
+	load = kcpustat_cpu(i).load;
+	if (load < lowest_load) {
+		lowest_load = load;
+		c = i;
+	}
 
 	// second option
 	i = FALCON_CPUS[(c + (skb->dev->ifindex>>1)) % NR_FALCON_CPUS];
-	if (!kcpustat_cpu(i).high)
-		return i;
+	load = kcpustat_cpu(i).load;
+	if (load < lowest_load) {
+		lowest_load = load;
+		c = i;
+	}
 
 	return c;  // if all are HIGH
 }

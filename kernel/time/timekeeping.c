@@ -2204,7 +2204,7 @@ static inline void calc_cpu_loads(void)
 		old_idle = kcpustat_cpu(c).old_idle;
 
 		// calculate load from old and new all/idle time
-		if (new_all - old_all < 10) {
+		if (new_all - old_all <= 0) {
 			idle_percent = 100;
 		} else {
 			idle_percent = (new_idle - old_idle) * 100 / (new_all - old_all);
@@ -2212,7 +2212,7 @@ static inline void calc_cpu_loads(void)
 				idle_percent = 100;
 		}
 
-		kcpustat_cpu(c).high = (idle_percent < 10)? true : false;
+		kcpustat_cpu(c).load = 100 - idle_percent;
 
 		kcpustat_cpu(c).old_all = new_all;
 		kcpustat_cpu(c).old_idle = new_idle;
