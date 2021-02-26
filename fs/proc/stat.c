@@ -23,7 +23,6 @@
 
 extern int FALCON_CPUS[40];
 extern int NR_FALCON_CPUS;
-extern u8 FALCON_STRESS;
 extern int CPUSTAT_INTERVAL;
 
 #ifdef arch_idle_time
@@ -237,10 +236,7 @@ static int falcon_cpus_show(struct seq_file *f, void *v)
 	for (i = 0; i < NR_FALCON_CPUS; i++) {
 		falcon_cpu_map |= (1ull << FALCON_CPUS[i]);
 	}
-	seq_printf(f, "%llx", falcon_cpu_map);
-	if (FALCON_STRESS)
-		seq_printf(f, " stress");
-	seq_putc(f, '\n');
+	seq_printf(f, "%llx\n", falcon_cpu_map);
 	return 0;
 }
 
@@ -257,21 +253,22 @@ static ssize_t falcon_cpus_write(struct file *file, const char __user *ubuf,
 	int len, i;
 	u64 falcon_cpu_map;
 
+	// copy user's input to kernel buffer
 	if (*pos > 0 || size > 100)
 		return -EFAULT;
 	if (copy_from_user(buf, ubuf, size))
 		return -EFAULT;
-	if (sscanf(buf, "%llx %s", &falcon_cpu_map, s) < 1)
-		return -EFAULT;
 
-	FALCON_STRESS = (strcmp(s, "stress") == 0);
+	// read the cpu map
+	if (sscanf(buf, "%llx", &falcon_cpu_map) != 1)
+		return -EFAULT;
 
 	len = strlen(buf);
 	*pos = len;
 
 	// fill the FALCON_CPUS array
 	NR_FALCON_CPUS = 0;
-	for (i = 0; i < nr_cpu_ids; i++) {
+	for_each_online_cpu(i) {
 		// check the bit
 		if (falcon_cpu_map & 1) {
 			FALCON_CPUS[NR_FALCON_CPUS] = i;

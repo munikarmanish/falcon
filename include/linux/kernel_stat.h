@@ -35,7 +35,7 @@ struct kernel_cpustat {
 	u64 cpustat[NR_STATS];
 	u64 old_all;
 	u64 old_idle;
-	bool high;
+	bool high; // load class
 };
 
 struct kernel_stat {

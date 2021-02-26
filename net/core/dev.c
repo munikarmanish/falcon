@@ -4395,43 +4395,43 @@ out_redir:
 }
 EXPORT_SYMBOL_GPL(do_xdp_generic);
 
-int FALCON_CPUS[40] = {0};
+int FALCON_CPUS[64] = {0};	// initialize array with all zeroes
 EXPORT_SYMBOL(FALCON_CPUS);
 
-int NR_FALCON_CPUS = 0;
+int NR_FALCON_CPUS = 0;		// disable FALCON by default
 EXPORT_SYMBOL(NR_FALCON_CPUS);
 
-u8 FALCON_STRESS = 0;
-EXPORT_SYMBOL(FALCON_STRESS);
-
-static int get_falcon_cpu(struct sk_buff *skb)
+static inline int get_falcon_cpu(struct sk_buff *skb)
 {
 	struct rps_dev_flow voidflow, *rflow = &voidflow;
 	int i, c = get_rps_cpu(skb->dev, skb, &rflow);
+	if (c < 0)
+		c = smp_processor_id();
 
 	if (NR_FALCON_CPUS == 0)	// if FALCON is disabled
 		return c;
 
-	// if (!kcpustat_cpu(c).high) 	// if RPS core is LOW
-	// 	return c;
+	if (!kcpustat_cpu(c).high) 	// if RPS core is LOW
+		return c;
 
-	// // first option
-	// i = FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
-	// if (!kcpustat_cpu(i).high)
-	// 	return i;
+	// first option
+	i = FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
+	if (!kcpustat_cpu(i).high)
+		return i;
 
-	// // second option
-	// i = FALCON_CPUS[(c + (skb->dev->ifindex>>1)) % NR_FALCON_CPUS];
-	// if (!kcpustat_cpu(i).high)
-	// 	return i;
+	// second option
+	i = FALCON_CPUS[(c + (skb->dev->ifindex>>1)) % NR_FALCON_CPUS];
+	if (!kcpustat_cpu(i).high)
+		return i;
 
 	return c;  // if all are HIGH
 }
 
 static int netif_rx_internal(struct sk_buff *skb)
 {
+	struct rps_dev_flow voidflow, *rflow = &voidflow;
+	int cpu;
 	int ret;
-	unsigned int qtail = 0;
 
 	net_timestamp_check(netdev_tstamp_prequeue, skb);
 
@@ -4440,7 +4440,8 @@ static int netif_rx_internal(struct sk_buff *skb)
 	if (NR_FALCON_CPUS > 0) { // FALCON is enabled
 		preempt_disable();
 		rcu_read_lock();
-		ret = enqueue_to_backlog(skb, get_falcon_cpu(skb), &qtail);
+		cpu = get_falcon_cpu(skb);
+		ret = enqueue_to_backlog(skb, cpu, &rflow->last_qtail);
 		rcu_read_unlock();
 		preempt_enable();
 		return ret;
@@ -4448,9 +4449,6 @@ static int netif_rx_internal(struct sk_buff *skb)
 
 #ifdef CONFIG_RPS
 	if (static_branch_unlikely(&rps_needed)) {
-		struct rps_dev_flow voidflow, *rflow = &voidflow;
-		int cpu;
-
 		preempt_disable();
 		rcu_read_lock();
 
@@ -4465,9 +4463,7 @@ static int netif_rx_internal(struct sk_buff *skb)
 	} else
 #endif
 	{
-		unsigned int qtail;
-
-		ret = enqueue_to_backlog(skb, get_cpu(), &qtail);
+		ret = enqueue_to_backlog(skb, get_cpu(), &rflow->last_qtail);
 		put_cpu();
 	}
 
@@ -10215,6 +10211,11 @@ static struct pernet_operations __net_initdata default_device_ops = {
 static int __init net_dev_init(void)
 {
 	int i, rc = -ENOMEM;
+
+	// initialize the FALCON_CPUS array
+	for (i = 0; i < nr_cpu_ids; i++) {
+		FALCON_CPUS[i] = 0;
+	}
 
 	BUG_ON(!dev_boot_phase);
 
