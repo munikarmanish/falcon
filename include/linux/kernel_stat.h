@@ -33,6 +33,9 @@ enum cpu_usage_stat {
 
 struct kernel_cpustat {
 	u64 cpustat[NR_STATS];
+	u64 old_all;
+	u64 old_idle;
+	int load; // load class
 };
 
 struct kernel_stat {

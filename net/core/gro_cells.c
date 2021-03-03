@@ -4,6 +4,8 @@
 #include <linux/netdevice.h>
 #include <net/gro_cells.h>
 
+extern int NR_FALCON_CPUS;
+
 struct gro_cell {
 	struct sk_buff_head	napi_skbs;
 	struct napi_struct	napi;
@@ -34,9 +36,13 @@ drop:
 		goto unlock;
 	}
 
-	__skb_queue_tail(&cell->napi_skbs, skb);
-	if (skb_queue_len(&cell->napi_skbs) == 1)
-		napi_schedule(&cell->napi);
+	if (NR_FALCON_CPUS > 0) {
+		netif_rx(skb);
+	} else {
+		__skb_queue_tail(&cell->napi_skbs, skb);
+		if (skb_queue_len(&cell->napi_skbs) == 1)
+			napi_schedule(&cell->napi);
+	}
 
 	res = NET_RX_SUCCESS;
 

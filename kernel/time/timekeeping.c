@@ -22,6 +22,7 @@
 #include <linux/pvclock_gtod.h>
 #include <linux/compiler.h>
 #include <linux/audit.h>
+#include <linux/kernel_stat.h>
 
 #include "tick-internal.h"
 #include "ntp_internal.h"
@@ -2188,12 +2189,54 @@ void ktime_get_coarse_ts64(struct timespec64 *ts)
 }
 EXPORT_SYMBOL(ktime_get_coarse_ts64);
 
+static inline void calc_cpu_loads(void)
+{
+	int c, i;
+	u64 new_all, new_idle, old_all, old_idle, idle_percent;
+
+	for_each_online_cpu(c) {
+		new_all = 0;
+		for (i = 0; i < NR_STATS; i++)
+			new_all += kcpustat_cpu(c).cpustat[i];
+		new_idle = kcpustat_cpu(c).cpustat[CPUTIME_IDLE];
+
+		old_all = kcpustat_cpu(c).old_all;
+		old_idle = kcpustat_cpu(c).old_idle;
+
+		// calculate load from old and new all/idle time
+		if (new_all - old_all <= 0) {
+			idle_percent = 100;
+		} else {
+			idle_percent = (new_idle - old_idle) * 100 /
+				       (new_all - old_all);
+			if (idle_percent > 100)
+				idle_percent = 100;
+		}
+
+		kcpustat_cpu(c).load = 100 - idle_percent;
+
+		kcpustat_cpu(c).old_all = new_all;
+		kcpustat_cpu(c).old_idle = new_idle;
+	}
+
+	// printk("load: %d\n", kcpustat_cpu(0).load);
+}
+
+int CPUSTAT_INTERVAL = 10;
+EXPORT_SYMBOL(CPUSTAT_INTERVAL);
+
+static u64 last_jiffies_64 = 0;
+
 /*
  * Must hold jiffies_lock
  */
 void do_timer(unsigned long ticks)
 {
 	jiffies_64 += ticks;
+	if (jiffies_64 - last_jiffies_64 >= CPUSTAT_INTERVAL) {
+		calc_cpu_loads();
+		last_jiffies_64 = jiffies_64;
+	}
 	calc_global_load(ticks);
 }
 

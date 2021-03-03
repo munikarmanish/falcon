@@ -143,6 +143,7 @@
 #include <linux/net_namespace.h>
 #include <linux/indirect_call_wrapper.h>
 #include <net/devlink.h>
+#include <linux/kernel_stat.h>
 
 #include "net-sysfs.h"
 
@@ -4394,19 +4395,86 @@ out_redir:
 }
 EXPORT_SYMBOL_GPL(do_xdp_generic);
 
+int FALCON_CPUS[64] = {0};	// initialize array with all zeroes
+EXPORT_SYMBOL(FALCON_CPUS);
+
+int NR_FALCON_CPUS = 0;		// disable FALCON by default
+EXPORT_SYMBOL(NR_FALCON_CPUS);
+
+int FALCON_LOAD_THRESHOLD = 90;	// threshold to split stages
+EXPORT_SYMBOL(FALCON_LOAD_THRESHOLD);
+
+int FALCON_LOAD_DIFF = 30;	// minimum difference in load to split
+EXPORT_SYMBOL(FALCON_LOAD_DIFF);
+
+int FALCON_BALANCE_INTERVAL = 100;
+EXPORT_SYMBOL(FALCON_BALANCE_INTERVAL);
+
+static int falcon_counter = 0;
+
+static inline int get_falcon_cpu(struct sk_buff *skb)
+{
+	int load, lowest_load, i, c = smp_processor_id();
+
+	if (NR_FALCON_CPUS == 0) // if FALCON is disabled
+		return c;
+
+	// for most packets, just use static hashing
+	falcon_counter++;
+	if (FALCON_BALANCE_INTERVAL <= 0 ||
+	    falcon_counter < FALCON_BALANCE_INTERVAL) {
+		return FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
+	}
+
+	// for some packet samples, use the sophisticated balancing algorithm
+	falcon_counter = 0;
+
+	load = kcpustat_cpu(c).load;
+	// if (load <= FALCON_LOAD_THRESHOLD) // if RPS core is LOW
+	// 	return c;
+	lowest_load = load - FALCON_LOAD_DIFF;
+
+	// first option
+	i = FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
+	load = kcpustat_cpu(i).load;
+	if (load < lowest_load) {
+		lowest_load = load;
+		c = i;
+	}
+
+	// second option
+	i = FALCON_CPUS[(i + (skb->dev->ifindex >> 1)) % NR_FALCON_CPUS];
+	load = kcpustat_cpu(i).load;
+	if (load < lowest_load) {
+		lowest_load = load;
+		c = i;
+	}
+
+	return c; // if all are HIGH
+}
+
 static int netif_rx_internal(struct sk_buff *skb)
 {
+	struct rps_dev_flow voidflow, *rflow = &voidflow;
+	int cpu;
 	int ret;
 
 	net_timestamp_check(netdev_tstamp_prequeue, skb);
 
 	trace_netif_rx(skb);
 
+	if (NR_FALCON_CPUS > 0) { // FALCON is enabled
+		preempt_disable();
+		rcu_read_lock();
+		cpu = get_falcon_cpu(skb);
+		ret = enqueue_to_backlog(skb, cpu, &rflow->last_qtail);
+		rcu_read_unlock();
+		preempt_enable();
+		return ret;
+	}
+
 #ifdef CONFIG_RPS
 	if (static_branch_unlikely(&rps_needed)) {
-		struct rps_dev_flow voidflow, *rflow = &voidflow;
-		int cpu;
-
 		preempt_disable();
 		rcu_read_lock();
 
@@ -4421,11 +4489,10 @@ static int netif_rx_internal(struct sk_buff *skb)
 	} else
 #endif
 	{
-		unsigned int qtail;
-
-		ret = enqueue_to_backlog(skb, get_cpu(), &qtail);
+		ret = enqueue_to_backlog(skb, get_cpu(), &rflow->last_qtail);
 		put_cpu();
 	}
+
 	return ret;
 }
 
@@ -10170,6 +10237,11 @@ static struct pernet_operations __net_initdata default_device_ops = {
 static int __init net_dev_init(void)
 {
 	int i, rc = -ENOMEM;
+
+	// initialize the FALCON_CPUS array
+	for (i = 0; i < nr_cpu_ids; i++) {
+		FALCON_CPUS[i] = 0;
+	}
 
 	BUG_ON(!dev_boot_phase);
 
