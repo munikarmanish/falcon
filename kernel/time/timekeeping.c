@@ -2207,7 +2207,8 @@ static inline void calc_cpu_loads(void)
 		if (new_all - old_all <= 0) {
 			idle_percent = 100;
 		} else {
-			idle_percent = (new_idle - old_idle) * 100 / (new_all - old_all);
+			idle_percent = (new_idle - old_idle) * 100 /
+				       (new_all - old_all);
 			if (idle_percent > 100)
 				idle_percent = 100;
 		}
@@ -2217,9 +2218,11 @@ static inline void calc_cpu_loads(void)
 		kcpustat_cpu(c).old_all = new_all;
 		kcpustat_cpu(c).old_idle = new_idle;
 	}
+
+	// printk("load: %d\n", kcpustat_cpu(0).load);
 }
 
-int CPUSTAT_INTERVAL = 100;
+int CPUSTAT_INTERVAL = 10;
 EXPORT_SYMBOL(CPUSTAT_INTERVAL);
 
 static u64 last_jiffies_64 = 0;

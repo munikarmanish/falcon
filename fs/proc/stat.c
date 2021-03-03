@@ -24,6 +24,9 @@
 extern int FALCON_CPUS[40];
 extern int NR_FALCON_CPUS;
 extern int CPUSTAT_INTERVAL;
+extern int FALCON_LOAD_THRESHOLD;
+extern int FALCON_LOAD_DIFF;
+extern int FALCON_BALANCE_INTERVAL;
 
 #ifdef arch_idle_time
 
@@ -228,6 +231,8 @@ static const struct file_operations proc_stat_operations = {
 	.release	= single_release,
 };
 
+/* FALCON_CPUS */
+
 static int falcon_cpus_show(struct seq_file *f, void *v)
 {
 	u64 falcon_cpu_map = 0;
@@ -287,6 +292,8 @@ static const struct file_operations falcon_cpus_ops = {
 	.release	= single_release,
 };
 
+/* CPUSTAT_INTERVAL */
+
 static int cpustat_show(struct seq_file *f, void *v)
 {
 	seq_printf(f, "%d\n", CPUSTAT_INTERVAL);
@@ -324,13 +331,15 @@ static const struct file_operations cpustat_ops = {
 	.release	= single_release,
 };
 
+/* CPU LOADS */
+
 static int loads_show(struct seq_file *f, void *v)
 {
-	int cpu = 0;
+	int cpu;
 	char c;
 
 	for_each_online_cpu(cpu) {
-		c = kcpustat_cpu(cpu).load >= 90? '|' : '.';
+		c = kcpustat_cpu(cpu).load >= FALCON_LOAD_THRESHOLD ? '|' : '.';
 		seq_putc(f, c);
 	}
 	seq_putc(f, '\n');
@@ -351,12 +360,150 @@ static const struct file_operations loads_ops = {
 	.release	= single_release,
 };
 
+/* THRESHOLD */
+
+static int threshold_show(struct seq_file *f, void *v)
+{
+	seq_printf(f, "%d\n", FALCON_LOAD_THRESHOLD);
+	return 0;
+}
+
+static int threshold_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, threshold_show, NULL);
+}
+
+static ssize_t threshold_write(struct file *file, const char __user *ubuf,
+			       size_t size, loff_t *pos)
+{
+	char buf[101];
+	int len, thres;
+
+
+	if (*pos > 0 || size > 100)
+		return -EFAULT;
+	if (copy_from_user(buf, ubuf, size))
+		return -EFAULT;
+	if (sscanf(buf, "%d", &thres) != 1)
+		return -EFAULT;
+	if (thres < 0 || thres > 100)
+		return -EFAULT;
+	
+	FALCON_LOAD_THRESHOLD = thres;
+
+	len = strlen(buf);
+	*pos = len;
+	return len;
+}
+
+static const struct file_operations threshold_ops = {
+	.open		= threshold_open,
+	.read		= seq_read,
+	.write		= threshold_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+/* DIFF */
+
+static int diff_show(struct seq_file *f, void *v)
+{
+	seq_printf(f, "%d\n", FALCON_LOAD_DIFF);
+	return 0;
+}
+
+static int diff_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, diff_show, NULL);
+}
+
+static ssize_t diff_write(struct file *file, const char __user *ubuf,
+			       size_t size, loff_t *pos)
+{
+	char buf[101];
+	int len, diff;
+
+	if (*pos > 0 || size > 100)
+		return -EFAULT;
+	if (copy_from_user(buf, ubuf, size))
+		return -EFAULT;
+	if (sscanf(buf, "%d", &diff) != 1)
+		return -EFAULT;
+	if (diff < 0 || diff > 100)
+		return -EFAULT;
+	
+	FALCON_LOAD_DIFF = diff;
+
+	len = strlen(buf);
+	*pos = len;
+	return len;
+}
+
+static const struct file_operations diff_ops = {
+	.open		= diff_open,
+	.read		= seq_read,
+	.write		= diff_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+/* PERCENT */
+
+static int percent_show(struct seq_file *f, void *v)
+{
+	seq_printf(f, "%d\n", 100 / FALCON_BALANCE_INTERVAL);
+	return 0;
+}
+
+static int percent_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, percent_show, NULL);
+}
+
+static ssize_t percent_write(struct file *file, const char __user *ubuf,
+			     size_t size, loff_t *pos)
+{
+	char buf[101];
+	int len, percent;
+
+	if (*pos > 0 || size > 100)
+		return -EFAULT;
+	if (copy_from_user(buf, ubuf, size))
+		return -EFAULT;
+	if (sscanf(buf, "%d", &percent) != 1)
+		return -EFAULT;
+
+	if (percent <= 0) {
+		FALCON_BALANCE_INTERVAL = 0;
+	} else {
+		if (percent > 100)
+			percent = 100;
+		percent = 100;
+		FALCON_BALANCE_INTERVAL = 100 / percent;
+	}
+
+	len = strlen(buf);
+	*pos = len;
+	return len;
+}
+
+static const struct file_operations percent_ops = {
+	.open		= percent_open,
+	.read		= seq_read,
+	.write		= percent_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static int __init proc_stat_init(void)
 {
 	proc_create("stat", 0, NULL, &proc_stat_operations);
 	proc_create("falcon_cpus", 0666, NULL, &falcon_cpus_ops);
 	proc_create("cpustat_interval", 0666, NULL, &cpustat_ops);
 	proc_create("loads", 0444, NULL, &loads_ops);
+	proc_create("threshold", 0666, NULL, &threshold_ops);
+	proc_create("diff", 0666, NULL, &diff_ops);
+	proc_create("balance_percent", 0666, NULL, &percent_ops);
 	return 0;
 }
 fs_initcall(proc_stat_init);

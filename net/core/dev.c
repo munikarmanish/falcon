@@ -4401,19 +4401,38 @@ EXPORT_SYMBOL(FALCON_CPUS);
 int NR_FALCON_CPUS = 0;		// disable FALCON by default
 EXPORT_SYMBOL(NR_FALCON_CPUS);
 
+int FALCON_LOAD_THRESHOLD = 90;	// threshold to split stages
+EXPORT_SYMBOL(FALCON_LOAD_THRESHOLD);
+
+int FALCON_LOAD_DIFF = 30;	// minimum difference in load to split
+EXPORT_SYMBOL(FALCON_LOAD_DIFF);
+
+int FALCON_BALANCE_INTERVAL = 100;
+EXPORT_SYMBOL(FALCON_BALANCE_INTERVAL);
+
+static int falcon_counter = 0;
+
 static inline int get_falcon_cpu(struct sk_buff *skb)
 {
-	u8 load = 0, lowest_load = 90;
-	struct rps_dev_flow voidflow, *rflow = &voidflow;
-	int i, c = get_rps_cpu(skb->dev, skb, &rflow);
-	if (c < 0)
-		c = smp_processor_id();
+	int load, lowest_load, i, c = smp_processor_id();
 
-	if (NR_FALCON_CPUS == 0)	// if FALCON is disabled
+	if (NR_FALCON_CPUS == 0) // if FALCON is disabled
 		return c;
 
-	if (kcpustat_cpu(c).load < 90) 	// if RPS core is LOW
-		return c;
+	// for most packets, just use static hashing
+	falcon_counter++;
+	if (FALCON_BALANCE_INTERVAL <= 0 ||
+	    falcon_counter < FALCON_BALANCE_INTERVAL) {
+		return FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
+	}
+
+	// for some packet samples, use the sophisticated balancing algorithm
+	falcon_counter = 0;
+
+	load = kcpustat_cpu(c).load;
+	// if (load <= FALCON_LOAD_THRESHOLD) // if RPS core is LOW
+	// 	return c;
+	lowest_load = load - FALCON_LOAD_DIFF;
 
 	// first option
 	i = FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
@@ -4424,14 +4443,14 @@ static inline int get_falcon_cpu(struct sk_buff *skb)
 	}
 
 	// second option
-	i = FALCON_CPUS[(c + (skb->dev->ifindex>>1)) % NR_FALCON_CPUS];
+	i = FALCON_CPUS[(i + (skb->dev->ifindex >> 1)) % NR_FALCON_CPUS];
 	load = kcpustat_cpu(i).load;
 	if (load < lowest_load) {
 		lowest_load = load;
 		c = i;
 	}
 
-	return c;  // if all are HIGH
+	return c; // if all are HIGH
 }
 
 static int netif_rx_internal(struct sk_buff *skb)
