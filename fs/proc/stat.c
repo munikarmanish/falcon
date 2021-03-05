@@ -451,7 +451,10 @@ static const struct file_operations diff_ops = {
 
 static int percent_show(struct seq_file *f, void *v)
 {
-	seq_printf(f, "%d\n", 100 / FALCON_BALANCE_INTERVAL);
+	int percent = 0;
+	if (FALCON_BALANCE_INTERVAL > 0)
+		percent = 100 / FALCON_BALANCE_INTERVAL;
+	seq_printf(f, "%d\n", percent);
 	return 0;
 }
 

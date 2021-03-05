@@ -4401,10 +4401,10 @@ EXPORT_SYMBOL(FALCON_CPUS);
 int NR_FALCON_CPUS = 0;		// disable FALCON by default
 EXPORT_SYMBOL(NR_FALCON_CPUS);
 
-int FALCON_LOAD_THRESHOLD = 90;	// threshold to split stages
+int FALCON_LOAD_THRESHOLD = 70;	// threshold to split stages
 EXPORT_SYMBOL(FALCON_LOAD_THRESHOLD);
 
-int FALCON_LOAD_DIFF = 30;	// minimum difference in load to split
+int FALCON_LOAD_DIFF = 20;	// minimum difference in load to split
 EXPORT_SYMBOL(FALCON_LOAD_DIFF);
 
 int FALCON_BALANCE_INTERVAL = 100;
@@ -4414,41 +4414,44 @@ static int falcon_counter = 0;
 
 static inline int get_falcon_cpu(struct sk_buff *skb)
 {
-	int load, lowest_load, i, c = smp_processor_id();
+	int load, lowest_load, i1, i2, c, this_cpu = smp_processor_id();
 
 	if (NR_FALCON_CPUS == 0) // if FALCON is disabled
-		return c;
+		return this_cpu;
 
-	// for most packets, just use static hashing
-	falcon_counter++;
-	if (FALCON_BALANCE_INTERVAL <= 0 ||
-	    falcon_counter < FALCON_BALANCE_INTERVAL) {
-		return FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
-	}
-
-	// for some packet samples, use the sophisticated balancing algorithm
-	falcon_counter = 0;
-
+	c = this_cpu;
 	load = kcpustat_cpu(c).load;
-	// if (load <= FALCON_LOAD_THRESHOLD) // if RPS core is LOW
-	// 	return c;
+	if (load < FALCON_LOAD_THRESHOLD)
+		return c;
 	lowest_load = load - FALCON_LOAD_DIFF;
 
 	// first option
-	i = FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
-	load = kcpustat_cpu(i).load;
+	i1 = FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
+	load = kcpustat_cpu(i1).load;
 	if (load < lowest_load) {
 		lowest_load = load;
-		c = i;
+		c = i1;
 	}
 
 	// second option
-	i = FALCON_CPUS[(i + (skb->dev->ifindex >> 1)) % NR_FALCON_CPUS];
-	load = kcpustat_cpu(i).load;
+	i2 = FALCON_CPUS[(i1 + (skb->dev->ifindex >> 1)) % NR_FALCON_CPUS];
+	load = kcpustat_cpu(i2).load;
 	if (load < lowest_load) {
 		lowest_load = load;
-		c = i;
+		c = i2;
 	}
+
+	if (c == this_cpu)
+		return c;
+
+	// for most packets, use the "random hashed" core (first option)
+	falcon_counter++;
+	if (FALCON_BALANCE_INTERVAL <= 0 ||
+	    falcon_counter < FALCON_BALANCE_INTERVAL) {
+		return i1;
+	}
+	// for some packet samples, return the "better" core
+	falcon_counter = 0;
 
 	return c; // if all are HIGH
 }
