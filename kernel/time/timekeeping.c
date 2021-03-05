@@ -2219,7 +2219,7 @@ static inline void calc_cpu_loads(void)
 		kcpustat_cpu(c).old_idle = new_idle;
 	}
 
-	// printk("load: %d\n", kcpustat_cpu(0).load);
+	printk("load: %d\n", kcpustat_cpu(0).load);
 }
 
 int CPUSTAT_INTERVAL = 10;
