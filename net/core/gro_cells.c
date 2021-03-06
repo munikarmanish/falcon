@@ -4,7 +4,6 @@
 #include <linux/netdevice.h>
 #include <net/gro_cells.h>
 
-extern int NR_FALCON_CPUS;
 
 struct gro_cell {
 	struct sk_buff_head	napi_skbs;
@@ -16,6 +15,9 @@ int gro_cells_receive(struct gro_cells *gcells, struct sk_buff *skb)
 	struct net_device *dev = skb->dev;
 	struct gro_cell *cell;
 	int res;
+	extern int NR_FALCON_CPUS;
+	extern int FALCON_LOAD_THRESHOLD;
+	extern int FALCON_AVG_LOAD;
 
 	rcu_read_lock();
 	if (unlikely(!(dev->flags & IFF_UP)))
@@ -36,7 +38,7 @@ drop:
 		goto unlock;
 	}
 
-	if (NR_FALCON_CPUS > 0) {
+	if (NR_FALCON_CPUS > 0 && FALCON_AVG_LOAD < FALCON_LOAD_THRESHOLD) {
 		netif_rx(skb);
 	} else {
 		__skb_queue_tail(&cell->napi_skbs, skb);

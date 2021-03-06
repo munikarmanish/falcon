@@ -4401,78 +4401,74 @@ EXPORT_SYMBOL(FALCON_CPUS);
 int NR_FALCON_CPUS = 0;		// disable FALCON by default
 EXPORT_SYMBOL(NR_FALCON_CPUS);
 
-int FALCON_LOAD_THRESHOLD = 70;	// threshold to split stages
+int FALCON_LOAD_THRESHOLD = 80;	// threshold to split stages
 EXPORT_SYMBOL(FALCON_LOAD_THRESHOLD);
 
 int FALCON_LOAD_DIFF = 20;	// minimum difference in load to split
 EXPORT_SYMBOL(FALCON_LOAD_DIFF);
 
-int FALCON_BALANCE_INTERVAL = 100;
+int FALCON_BALANCE_INTERVAL = 0;
 EXPORT_SYMBOL(FALCON_BALANCE_INTERVAL);
 
-static int falcon_counter = 0;
+int FALCON_AVG_LOAD = 0;
+EXPORT_SYMBOL(FALCON_AVG_LOAD);
 
-static inline int get_falcon_cpu(struct sk_buff *skb)
-{
-	int load, lowest_load, i1, i2, c, this_cpu = smp_processor_id();
+// static int falcon_counter = 0;
+// static inline int get_falcon_cpu(struct sk_buff *skb)
+// {
+// 	// int load, lowest_load, i1, i2,
+// 	int c = smp_processor_id();
 
-	if (NR_FALCON_CPUS == 0) // if FALCON is disabled
-		return this_cpu;
+// 	// // for most packets, use the "random hashed" core (first option)
+// 	// falcon_counter++;
+// 	// if (FALCON_BALANCE_INTERVAL == 0 ||
+// 	//     falcon_counter < FALCON_BALANCE_INTERVAL) {
+// 		return FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
+// 	// }
+// 	// // for some packet samples, return the "better" core
+// 	// falcon_counter = 0;
 
-	c = this_cpu;
-	load = kcpustat_cpu(c).load;
-	if (load < FALCON_LOAD_THRESHOLD)
-		return c;
-	lowest_load = load - FALCON_LOAD_DIFF;
+// 	// c = this_cpu;
+// 	// load = kcpustat_cpu(c).load;
+// 	// // if (load < FALCON_LOAD_THRESHOLD)
+// 	// // 	return c;
+// 	// lowest_load = load - FALCON_LOAD_DIFF;
 
-	// first option
-	i1 = FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
-	load = kcpustat_cpu(i1).load;
-	if (load < lowest_load) {
-		lowest_load = load;
-		c = i1;
-	}
+// 	// // first option
+// 	// i1 = FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
+// 	// load = kcpustat_cpu(i1).load;
+// 	// if (load < lowest_load) {
+// 	// 	lowest_load = load;
+// 	// 	c = i1;
+// 	// }
 
-	// second option
-	i2 = FALCON_CPUS[(i1 + (skb->dev->ifindex >> 1)) % NR_FALCON_CPUS];
-	load = kcpustat_cpu(i2).load;
-	if (load < lowest_load) {
-		lowest_load = load;
-		c = i2;
-	}
+// 	// // second option
+// 	// i2 = FALCON_CPUS[(i1 + (skb->dev->ifindex >> 1)) % NR_FALCON_CPUS];
+// 	// load = kcpustat_cpu(i2).load;
+// 	// if (load < lowest_load) {
+// 	// 	lowest_load = load;
+// 	// 	c = i2;
+// 	// }
 
-	if (c == this_cpu)
-		return c;
-
-	// for most packets, use the "random hashed" core (first option)
-	falcon_counter++;
-	if (FALCON_BALANCE_INTERVAL <= 0 ||
-	    falcon_counter < FALCON_BALANCE_INTERVAL) {
-		return i1;
-	}
-	// for some packet samples, return the "better" core
-	falcon_counter = 0;
-
-	return c; // if all are HIGH
-}
+// 	// return c; // if all are HIGH
+// }
 
 static int netif_rx_internal(struct sk_buff *skb)
 {
 	struct rps_dev_flow voidflow, *rflow = &voidflow;
 	int cpu;
 	int ret;
+	// extern int FALCON_AVG_LOAD;
 
 	net_timestamp_check(netdev_tstamp_prequeue, skb);
 
 	trace_netif_rx(skb);
 
-	if (NR_FALCON_CPUS > 0) { // FALCON is enabled
-		preempt_disable();
-		rcu_read_lock();
-		cpu = get_falcon_cpu(skb);
+	// if Falcon is enabled
+	if (NR_FALCON_CPUS > 0 && FALCON_AVG_LOAD < FALCON_LOAD_THRESHOLD) {
+		cpu = FALCON_CPUS[(get_cpu() + skb->dev->ifindex) % NR_FALCON_CPUS];
 		ret = enqueue_to_backlog(skb, cpu, &rflow->last_qtail);
-		rcu_read_unlock();
-		preempt_enable();
+		put_cpu();
 		return ret;
 	}
 
