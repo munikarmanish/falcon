@@ -2189,10 +2189,12 @@ void ktime_get_coarse_ts64(struct timespec64 *ts)
 }
 EXPORT_SYMBOL(ktime_get_coarse_ts64);
 
+
 static inline void calc_cpu_loads(void)
 {
-	int c, i;
+	int c, i, sum;
 	u64 new_all, new_idle, old_all, old_idle, idle_percent;
+	extern int FALCON_AVG_LOAD;
 
 	for_each_online_cpu(c) {
 		new_all = 0;
@@ -2213,13 +2215,20 @@ static inline void calc_cpu_loads(void)
 				idle_percent = 100;
 		}
 
-		kcpustat_cpu(c).load = 100 - idle_percent;
+		kcpustat_cpu(c).load = ((kcpustat_cpu(c).load<<2) + 100 - idle_percent) / 5;
+		sum += kcpustat_cpu(c).load;
 
 		kcpustat_cpu(c).old_all = new_all;
 		kcpustat_cpu(c).old_idle = new_idle;
 	}
 
-	printk("load: %d\n", kcpustat_cpu(0).load);
+	sum = 0;
+	for (i = 0; i < 6; i++) {
+		sum += kcpustat_cpu(2*i).load;
+	}
+	FALCON_AVG_LOAD = sum / 6;
+
+	printk("load: %d\n", FALCON_AVG_LOAD);
 }
 
 int CPUSTAT_INTERVAL = 10;
