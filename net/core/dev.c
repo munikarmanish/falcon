@@ -4395,6 +4395,14 @@ out_redir:
 }
 EXPORT_SYMBOL_GPL(do_xdp_generic);
 
+//grosplit
+int GROSPLIT_CPUS[64] = {0};
+EXPORT_SYMBOL(GROSPLIT_CPUS);
+
+int NR_GROSPLIT_CPUS = 0;
+EXPORT_SYMBOL(NR_GROSPLIT_CPUS);
+//end
+
 int FALCON_CPUS[64] = {0};	// initialize array with all zeroes
 EXPORT_SYMBOL(FALCON_CPUS);
 
@@ -4412,6 +4420,14 @@ EXPORT_SYMBOL(FALCON_BALANCE_INTERVAL);
 
 int FALCON_AVG_LOAD = 0;
 EXPORT_SYMBOL(FALCON_AVG_LOAD);
+
+static int get_grosplit_cpu(struct sk_buff *skb)
+{
+        int i;
+
+        i = skb_get_hash(skb) % NR_GROSPLIT_CPUS;
+        return GROSPLIT_CPUS[i];
+}
 
 // static int falcon_counter = 0;
 // static inline int get_falcon_cpu(struct sk_buff *skb)
@@ -4459,10 +4475,24 @@ static int netif_rx_internal(struct sk_buff *skb)
 	int cpu;
 	int ret;
 	// extern int FALCON_AVG_LOAD;
+//grosplit
+        unsigned int qtail_2 = 0;
+//end
 
 	net_timestamp_check(netdev_tstamp_prequeue, skb);
 
 	trace_netif_rx(skb);
+
+//grosplit
+        if (NR_GROSPLIT_CPUS > 0 && FALCON_AVG_LOAD < FALCON_LOAD_THRESHOLD) {
+                preempt_disable();
+                rcu_read_lock();
+                ret = enqueue_to_backlog(skb, get_grosplit_cpu(skb), &qtail_2);
+                rcu_read_unlock();
+                preempt_enable();
+                return ret;
+        }
+//end
 
 	// if Falcon is enabled
 	if (NR_FALCON_CPUS > 0 && FALCON_AVG_LOAD < FALCON_LOAD_THRESHOLD) {
@@ -5929,13 +5959,18 @@ static int process_backlog(struct napi_struct *napi, int quota)
 		struct sk_buff *skb;
 
 		while ((skb = __skb_dequeue(&sd->process_queue))) {
-			rcu_read_lock();
-			__netif_receive_skb(skb);
-			rcu_read_unlock();
-			input_queue_head_incr(sd);
-			if (++work >= quota)
-				return work;
-
+//grosplit
+                        if(NR_GROSPLIT_CPUS > 0){
+                                napi_gro_receive(napi, skb);
+                        }else{
+//end
+				rcu_read_lock();
+				__netif_receive_skb(skb);
+				rcu_read_unlock();
+				input_queue_head_incr(sd);
+				if (++work >= quota)
+					return work;
+			}
 		}
 
 		local_irq_disable();
@@ -6408,6 +6443,12 @@ static int napi_poll(struct napi_struct *n, struct list_head *repoll)
 	list_add_tail(&n->poll_list, repoll);
 
 out_unlock:
+//grosplit
+        if(n->gro_bitmask){
+                napi_gro_flush(n, HZ >= 1000);
+        }
+        gro_normal_list(n);
+//end
 	netpoll_poll_unlock(have);
 
 	return work;
@@ -10236,6 +10277,12 @@ static struct pernet_operations __net_initdata default_device_ops = {
 static int __init net_dev_init(void)
 {
 	int i, rc = -ENOMEM;
+
+//grosplit
+        for (i = 0; i < nr_cpu_ids; i++) {
+                GROSPLIT_CPUS[i] = 0;
+        }
+//end
 
 	// initialize the FALCON_CPUS array
 	for (i = 0; i < nr_cpu_ids; i++) {
