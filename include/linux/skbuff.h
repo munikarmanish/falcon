@@ -825,6 +825,8 @@ struct sk_buff {
 	__u8			decrypted:1;
 #endif
 
+	__u8			disable_falcon:1;
+
 #ifdef CONFIG_NET_SCHED
 	__u16			tc_index;	/* traffic control index */
 #endif
