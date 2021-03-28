@@ -28,6 +28,11 @@ extern int FALCON_LOAD_THRESHOLD;
 extern int FALCON_LOAD_DIFF;
 extern int FALCON_BALANCE_INTERVAL;
 
+//grosplit
+extern int GROSPLIT_CPUS[40];
+extern int NR_GROSPLIT_CPUS;
+//end
+
 #ifdef arch_idle_time
 
 static u64 get_idle_time(struct kernel_cpustat *kcs, int cpu)
@@ -230,6 +235,64 @@ static const struct file_operations proc_stat_operations = {
 	.llseek		= seq_lseek,
 	.release	= single_release,
 };
+
+//grosplit
+static int grosplit_cpus_show(struct seq_file *f, void *v)
+{
+        u64 grosplit_cpu_map = 0;
+        int i;
+
+        for (i = 0; i < NR_GROSPLIT_CPUS; i++) {
+                grosplit_cpu_map |= (1ull << GROSPLIT_CPUS[i]);
+        }
+        seq_printf(f, "%llx\n", grosplit_cpu_map);
+        return 0;
+}
+
+static int grosplit_cpus_open(struct inode *inode, struct file *file)
+{
+        return single_open(file, grosplit_cpus_show, NULL);
+}
+
+static ssize_t grosplit_cpus_write(struct file *file, const char __user *ubuf,
+                                 size_t size, loff_t *pos)
+{
+        char buf[101];
+        int len, i;
+        u64 grosplit_cpu_map;
+
+        if (*pos > 0 || size > 100)
+                return -EFAULT;
+        if (copy_from_user(buf, ubuf, size))
+                return -EFAULT;
+
+        if (sscanf(buf, "%llx", &grosplit_cpu_map) != 1)
+                return -EFAULT;
+
+        len = strlen(buf);
+        *pos = len;
+
+        NR_GROSPLIT_CPUS = 0;
+        for_each_online_cpu(i) {
+                // check the bit
+                if (grosplit_cpu_map & 1) {
+                        GROSPLIT_CPUS[NR_GROSPLIT_CPUS] = i;
+                        NR_GROSPLIT_CPUS++;
+                }
+                grosplit_cpu_map >>= 1;
+        }
+
+        return len;
+}
+
+static const struct file_operations grosplit_cpus_ops = {
+        .open              = grosplit_cpus_open,
+        .read              = seq_read,
+        .write             = grosplit_cpus_write,
+        .llseek             = seq_lseek,
+        .release           = single_release,
+};
+//end
 
 /* FALCON_CPUS */
 
@@ -507,6 +570,9 @@ static int __init proc_stat_init(void)
 	proc_create("threshold", 0666, NULL, &threshold_ops);
 	proc_create("diff", 0666, NULL, &diff_ops);
 	proc_create("balance_percent", 0666, NULL, &percent_ops);
+//grosplit
+	proc_create("grosplit_cpus", 0666, NULL, &grosplit_cpus_ops);
+//end
 	return 0;
 }
 fs_initcall(proc_stat_init);
