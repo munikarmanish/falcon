@@ -49,6 +49,8 @@
 #include "en/xdp.h"
 #include "en/xsk/rx.h"
 #include "en/health.h"
+#include <uapi/linux/ip.h>
+#include <uapi/linux/udp.h>
 
 //grosplit
 #include <linux/kernel_stat.h>
@@ -57,6 +59,32 @@ extern int NR_GROSPLIT_CPUS;
 extern int FALCON_LOAD_THRESHOLD;
 extern int FALCON_AVG_LOAD;
 //end
+
+static inline void set_packet_type(struct sk_buff *skb)
+{
+	struct iphdr *iph;
+	struct udphdr *udph;
+	u8 *cursor = skb->head;
+	u16 skb_mac_h_offset = skb->mac_header;
+	u16 skb_ip_h_offset = skb_mac_h_offset + 14;
+	cursor += skb_ip_h_offset;
+
+check_l3_and_l4:
+	iph = (struct iphdr *)cursor;
+	cursor += sizeof(*iph);
+	if (iph->protocol == IPPROTO_TCP) {
+		skb->is_tcp = 1;
+	} else if (iph->protocol == IPPROTO_UDP) {
+		udph = (struct udphdr *)cursor;
+		cursor += sizeof(*udph);
+		if (udph->dest == htons(4789)) {
+			cursor += 8 + 14;
+			goto check_l3_and_l4;
+		} else {
+			skb->is_udp = 1;
+		}
+	}
+}
 
 static inline bool mlx5e_rx_hw_stamp(struct hwtstamp_config *config)
 {

@@ -4423,10 +4423,10 @@ EXPORT_SYMBOL(FALCON_AVG_LOAD);
 
 static int get_grosplit_cpu(struct sk_buff *skb)
 {
-        int i;
+	u32 hash;
 
-        i = skb_get_hash(skb) % NR_GROSPLIT_CPUS;
-        return GROSPLIT_CPUS[i];
+        hash = hash_32(skb_get_hash(skb), 16);
+        return GROSPLIT_CPUS[hash % NR_GROSPLIT_CPUS];
 }
 
 static inline int get_falcon_cpu(struct sk_buff *skb)
@@ -4454,7 +4454,7 @@ static int netif_rx_internal(struct sk_buff *skb)
 	trace_netif_rx(skb);
 
 	//grosplit
-        if (NR_GROSPLIT_CPUS > 0 && FALCON_AVG_LOAD < FALCON_LOAD_THRESHOLD) {
+        if (skb->is_tcp && NR_GROSPLIT_CPUS > 0 && FALCON_AVG_LOAD < FALCON_LOAD_THRESHOLD) {
                 preempt_disable();
                 rcu_read_lock();
                 ret = enqueue_to_backlog(skb, get_grosplit_cpu(skb), &rflow->last_qtail);
@@ -4465,7 +4465,7 @@ static int netif_rx_internal(struct sk_buff *skb)
 	//end
 
 	// if Falcon is enabled
-	if (NR_FALCON_CPUS > 0 && FALCON_AVG_LOAD < FALCON_LOAD_THRESHOLD) {
+	if (skb->is_udp && NR_FALCON_CPUS > 0 && FALCON_AVG_LOAD < FALCON_LOAD_THRESHOLD) {
 		preempt_disable();
 		cpu = get_falcon_cpu(skb);
 		ret = enqueue_to_backlog(skb, cpu, &rflow->last_qtail);
