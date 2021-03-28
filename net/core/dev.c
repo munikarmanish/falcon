@@ -4429,76 +4429,47 @@ static int get_grosplit_cpu(struct sk_buff *skb)
         return GROSPLIT_CPUS[i];
 }
 
-// static int falcon_counter = 0;
-// static inline int get_falcon_cpu(struct sk_buff *skb)
-// {
-// 	// int load, lowest_load, i1, i2,
-// 	int c = smp_processor_id();
+static inline int get_falcon_cpu(struct sk_buff *skb)
+{
+	int c;
+	u32 hash;
 
-// 	// // for most packets, use the "random hashed" core (first option)
-// 	// falcon_counter++;
-// 	// if (FALCON_BALANCE_INTERVAL == 0 ||
-// 	//     falcon_counter < FALCON_BALANCE_INTERVAL) {
-// 		return FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
-// 	// }
-// 	// // for some packet samples, return the "better" core
-// 	// falcon_counter = 0;
-
-// 	// c = this_cpu;
-// 	// load = kcpustat_cpu(c).load;
-// 	// // if (load < FALCON_LOAD_THRESHOLD)
-// 	// // 	return c;
-// 	// lowest_load = load - FALCON_LOAD_DIFF;
-
-// 	// // first option
-// 	// i1 = FALCON_CPUS[(c + skb->dev->ifindex) % NR_FALCON_CPUS];
-// 	// load = kcpustat_cpu(i1).load;
-// 	// if (load < lowest_load) {
-// 	// 	lowest_load = load;
-// 	// 	c = i1;
-// 	// }
-
-// 	// // second option
-// 	// i2 = FALCON_CPUS[(i1 + (skb->dev->ifindex >> 1)) % NR_FALCON_CPUS];
-// 	// load = kcpustat_cpu(i2).load;
-// 	// if (load < lowest_load) {
-// 	// 	lowest_load = load;
-// 	// 	c = i2;
-// 	// }
-
-// 	// return c; // if all are HIGH
-// }
+	hash = hash_32(skb_get_hash(skb) + skb->dev->ifindex, 16);
+	c = FALCON_CPUS[hash % NR_FALCON_CPUS];
+	if (FALCON_LOAD_DIFF == 0)
+		return c;
+	if (kcpustat_cpu(c).load < FALCON_LOAD_THRESHOLD)
+		return c;
+	hash = hash_32(hash, 16);
+	return FALCON_CPUS[hash % NR_FALCON_CPUS];
+}
 
 static int netif_rx_internal(struct sk_buff *skb)
 {
 	struct rps_dev_flow voidflow, *rflow = &voidflow;
-	int cpu;
-	int ret;
-	// extern int FALCON_AVG_LOAD;
-//grosplit
-        unsigned int qtail_2 = 0;
-//end
+	int cpu, ret;
 
 	net_timestamp_check(netdev_tstamp_prequeue, skb);
 
 	trace_netif_rx(skb);
 
-//grosplit
+	//grosplit
         if (NR_GROSPLIT_CPUS > 0 && FALCON_AVG_LOAD < FALCON_LOAD_THRESHOLD) {
                 preempt_disable();
                 rcu_read_lock();
-                ret = enqueue_to_backlog(skb, get_grosplit_cpu(skb), &qtail_2);
+                ret = enqueue_to_backlog(skb, get_grosplit_cpu(skb), &rflow->last_qtail);
                 rcu_read_unlock();
                 preempt_enable();
                 return ret;
         }
-//end
+	//end
 
 	// if Falcon is enabled
 	if (NR_FALCON_CPUS > 0 && FALCON_AVG_LOAD < FALCON_LOAD_THRESHOLD) {
-		cpu = FALCON_CPUS[(get_cpu() + skb->dev->ifindex) % NR_FALCON_CPUS];
+		preempt_disable();
+		cpu = get_falcon_cpu(skb);
 		ret = enqueue_to_backlog(skb, cpu, &rflow->last_qtail);
-		put_cpu();
+		preempt_enable();
 		return ret;
 	}
 
