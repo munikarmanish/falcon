@@ -4418,9 +4418,6 @@ static inline int get_falcon_cpu(struct sk_buff *skb)
 	int c;
 	u32 hash;
 
-	if (skb->disable_falcon)
-		return smp_processor_id();
-
 	hash = hash_32(skb_get_hash(skb) + skb->dev->ifindex, 16);
 	c = FALCON_CPUS[hash % NR_FALCON_CPUS];
 	if (FALCON_LOAD_DIFF == 0)

@@ -50,37 +50,6 @@
 #include "en/xsk/rx.h"
 #include "en/health.h"
 
-static inline void check_if_falcon_needs_to_be_disabled(struct sk_buff *skb)
-{
-	struct iphdr *iph;
-	struct udphdr *udph;
-	u8 *cursor = skb->head;
-	u16 skb_mac_h_offset = skb->mac_header;
-	u16 skb_ip_h_offset = skb_mac_h_offset + 14;
-	cursor += skb_ip_h_offset;
-
-	skb->disable_falcon = 0;
-
-check_l3_and_l4:
-	iph = (struct iphdr *)cursor;
-	cursor += sizeof(*iph);
-	if (iph->protocol != IPPROTO_UDP)
-		return;
-	if (ntohl(iph->saddr) == 0x0a0001de) // 10.0.1.222
-		goto falcon_needs_to_be_disabled;
-	udph = (struct udphdr *)cursor;
-	cursor += sizeof(*udph);
-	if (ntohs(udph->dest) == 4789) {
-		cursor += 8 + 14;
-		goto check_l3_and_l4;
-	}
-	return;
-
-falcon_needs_to_be_disabled:
-	skb->disable_falcon = 1;
-}
-
-
 static inline bool mlx5e_rx_hw_stamp(struct hwtstamp_config *config)
 {
 	return config->rx_filter == HWTSTAMP_FILTER_ALL;
@@ -1208,7 +1177,6 @@ void mlx5e_handle_rx_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 	}
 
 	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
-	check_if_falcon_needs_to_be_disabled(skb);
 	napi_gro_receive(rq->cq.napi, skb);
 
 free_wqe:
@@ -1256,7 +1224,6 @@ void mlx5e_handle_rx_cqe_rep(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 	if (rep->vlan && skb_vlan_tag_present(skb))
 		skb_vlan_pop(skb);
 
-	check_if_falcon_needs_to_be_disabled(skb);
 	napi_gro_receive(rq->cq.napi, skb);
 
 free_wqe:
@@ -1398,7 +1365,6 @@ void mlx5e_handle_rx_cqe_mpwrq(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 		goto mpwrq_cqe_out;
 
 	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
-	check_if_falcon_needs_to_be_disabled(skb);
 	napi_gro_receive(rq->cq.napi, skb);
 
 mpwrq_cqe_out:
@@ -1581,7 +1547,6 @@ void mlx5i_handle_rx_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 		dev_kfree_skb_any(skb);
 		goto wq_free_wqe;
 	}
-	check_if_falcon_needs_to_be_disabled(skb);
 	napi_gro_receive(rq->cq.napi, skb);
 
 wq_free_wqe:
@@ -1622,7 +1587,6 @@ void mlx5e_ipsec_handle_rx_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 		goto wq_free_wqe;
 
 	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
-	check_if_falcon_needs_to_be_disabled(skb);
 	napi_gro_receive(rq->cq.napi, skb);
 
 wq_free_wqe:
