@@ -10342,4 +10342,7 @@ out:
 	return rc;
 }
 
+u16 PRIORITY_PORT = htons(9999);
+EXPORT_SYMBOL(PRIORITY_PORT);
+
 subsys_initcall(net_dev_init);

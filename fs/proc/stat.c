@@ -14,6 +14,8 @@
 #include <linux/sched/cputime.h>
 #include <linux/tick.h>
 
+extern u16 PRIORITY_PORT;
+
 #ifndef arch_irq_stat_cpu
 #define arch_irq_stat_cpu(cpu) 0
 #endif
@@ -224,9 +226,52 @@ static const struct file_operations proc_stat_operations = {
 	.release	= single_release,
 };
 
+static int port_show(struct seq_file *f, void *v)
+{
+	int port = ntohs(PRIORITY_PORT);
+	seq_printf(f, "%d\n", port);
+	return 0;
+}
+
+static int port_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, port_show, NULL);
+}
+
+static ssize_t port_write(struct file *file, const char __user *ubuf,
+			     size_t size, loff_t *pos)
+{
+	char buf[101];
+	int len, port;
+
+	if (*pos > 0 || size > 100)
+		return -EFAULT;
+	if (copy_from_user(buf, ubuf, size))
+		return -EFAULT;
+	if (sscanf(buf, "%d", &port) != 1)
+		return -EFAULT;
+	if (port <= 0)
+		return -EFAULT;
+
+	PRIORITY_PORT = htons(port);
+
+	len = strlen(buf);
+	*pos = len;
+	return len;
+}
+
+static const struct file_operations port_ops = {
+	.open		= port_open,
+	.read		= seq_read,
+	.write		= port_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static int __init proc_stat_init(void)
 {
 	proc_create("stat", 0, NULL, &proc_stat_operations);
+	proc_create("port", 0666, NULL, &port_ops);
 	return 0;
 }
 fs_initcall(proc_stat_init);
