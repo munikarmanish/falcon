@@ -11,32 +11,6 @@ struct gro_cell {
 	struct napi_struct	napi;
 };
 
-u8 skb_is_high_priority(struct sk_buff *skb)
-{
-	struct iphdr *iph;
-	struct udphdr *udph;
-	u8 *cursor = skb->head;
-	u16 skb_mac_h_offset = skb->mac_header;
-	u16 skb_ip_h_offset = skb_mac_h_offset + 14;
-	cursor += skb_ip_h_offset;
-
-check_l3_and_l4:
-	iph = (struct iphdr *)cursor;
-	cursor += sizeof(*iph);
-	if (iph->protocol != IPPROTO_UDP)
-		return 0;
-	udph = (struct udphdr *)cursor;
-	cursor += sizeof(*udph);
-	if (udph->dest == htons(12345)) {
-		return 1;
-	} else if (udph->dest == htons(4789)) {
-		cursor += 8 + 14;
-		goto check_l3_and_l4;
-	} else {
-		return 0;
-	}
-}
-
 int gro_cells_receive(struct gro_cells *gcells, struct sk_buff *skb)
 {
 	struct net_device *dev = skb->dev;
@@ -62,8 +36,8 @@ drop:
 		goto unlock;
 	}
 
-	if ((skb->high_priority = skb_is_high_priority(skb))) {
-		napi_gro_receive(&cell->napi, skb);
+	if (skb->high_priority) {
+		netif_receive_skb(skb);
 	} else {
 		__skb_queue_tail(&cell->napi_skbs, skb);
 		if (skb_queue_len(&cell->napi_skbs) == 1)

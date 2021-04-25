@@ -1752,9 +1752,6 @@ static int vxlan_rcv(struct sock *sk, struct sk_buff *skb)
 	oiph = skb_network_header(skb);
 	skb_reset_network_header(skb);
 
-	if (udp_hdr(skb)->dest == htons(12345))
-		skb->high_priority = 1;
-
 	if (!vxlan_ecn_decapsulate(vs, oiph, skb)) {
 		++vxlan->dev->stats.rx_frame_errors;
 		++vxlan->dev->stats.rx_errors;
