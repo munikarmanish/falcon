@@ -50,13 +50,12 @@
 #include "en/xsk/rx.h"
 #include "en/health.h"
 
-extern u16 PRIORITY_PORT;
-
 u8 skb_is_high_priority(struct sk_buff *skb)
 {
 	struct iphdr *iph;
 	struct udphdr *udph;
 	struct tcphdr *tcph;
+	u16 PRIORITY_PORT = htons(9999);
 	u16 VXLAN_PORT = htons(4789);
 	u8 *cursor = skb->head;
 	u16 skb_mac_h_offset = skb->mac_header;
@@ -71,20 +70,21 @@ check_l3_and_l4:
 		if (udph->dest == PRIORITY_PORT) {
 			return 1;
 		} else if (udph->dest == VXLAN_PORT) {
-			cursor += sizeof(*udph) + 8 + 14;
+			cursor += (sizeof(*udph) + 8 + 14);
 			goto check_l3_and_l4;
 		} else {
 			return 0;
 		}
-	} else if (iph->protocol == IPPROTO_TCP) {
+	}
+	else if (iph->protocol == IPPROTO_TCP) {
 		tcph = (struct tcphdr *)cursor;
 		if (tcph->dest == PRIORITY_PORT)
 			return 1;
 		else
 			return 0;
-	} else {
-		return 0;
 	}
+
+	return 0;
 }
 
 static inline bool mlx5e_rx_hw_stamp(struct hwtstamp_config *config)
@@ -1215,9 +1215,10 @@ void mlx5e_handle_rx_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 
 	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
 	skb->high_priority = skb_is_high_priority(skb);
-	if (skb->high_priority == 0)
+	if (skb->high_priority)
+		napi_gro_receive(rq->cq.napi, skb);
+	else
 		netif_rx(skb);
-	napi_gro_receive(rq->cq.napi, skb);
 
 free_wqe:
 	mlx5e_free_rx_wqe(rq, wi, true);
@@ -1265,9 +1266,10 @@ void mlx5e_handle_rx_cqe_rep(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 		skb_vlan_pop(skb);
 
 	skb->high_priority = skb_is_high_priority(skb);
-	if (skb->high_priority == 0)
+	if (skb->high_priority)
+		napi_gro_receive(rq->cq.napi, skb);
+	else
 		netif_rx(skb);
-	napi_gro_receive(rq->cq.napi, skb);
 
 free_wqe:
 	mlx5e_free_rx_wqe(rq, wi, true);
@@ -1409,9 +1411,10 @@ void mlx5e_handle_rx_cqe_mpwrq(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 
 	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
 	skb->high_priority = skb_is_high_priority(skb);
-	if (skb->high_priority == 0)
+	if (skb->high_priority)
+		napi_gro_receive(rq->cq.napi, skb);
+	else
 		netif_rx(skb);
-	napi_gro_receive(rq->cq.napi, skb);
 
 mpwrq_cqe_out:
 	if (likely(wi->consumed_strides < rq->mpwqe.num_strides))
@@ -1594,9 +1597,10 @@ void mlx5i_handle_rx_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 		goto wq_free_wqe;
 	}
 	skb->high_priority = skb_is_high_priority(skb);
-	if (skb->high_priority == 0)
+	if (skb->high_priority)
+		napi_gro_receive(rq->cq.napi, skb);
+	else
 		netif_rx(skb);
-	napi_gro_receive(rq->cq.napi, skb);
 
 wq_free_wqe:
 	mlx5e_free_rx_wqe(rq, wi, true);
@@ -1637,9 +1641,10 @@ void mlx5e_ipsec_handle_rx_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 
 	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
 	skb->high_priority = skb_is_high_priority(skb);
-	if (skb->high_priority == 0)
+	if (skb->high_priority)
+		napi_gro_receive(rq->cq.napi, skb);
+	else
 		netif_rx(skb);
-	napi_gro_receive(rq->cq.napi, skb);
 
 wq_free_wqe:
 	mlx5e_free_rx_wqe(rq, wi, true);
