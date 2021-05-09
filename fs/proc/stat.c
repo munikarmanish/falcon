@@ -224,9 +224,101 @@ static const struct file_operations proc_stat_operations = {
 	.release	= single_release,
 };
 
+//============== PPSYNC_SPLIT =================================================
+
+extern int PPSYNC_SPLIT;
+
+static int split_show(struct seq_file *p, void *v)
+{
+	seq_printf(p, "%d\n", PPSYNC_SPLIT);
+	return 0;
+}
+
+static int split_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, split_show, NULL);
+}
+
+static ssize_t split_write(struct file *file, const char __user *ubuf,
+			   size_t size, loff_t *pos)
+{
+	char buf[101];
+	int len, split;
+
+	if (*pos > 0 || size > 100)
+		return -EFAULT;
+	if (copy_from_user(buf, ubuf, size))
+		return -EFAULT;
+	if (sscanf(buf, "%d", &split) != 1)
+		return -EFAULT;
+	if (split < 0)
+		return -EFAULT;
+
+	PPSYNC_SPLIT = split;
+
+	len = strlen(buf);
+	*pos = len;
+	return len;
+}
+
+static const struct file_operations split_ops = {
+	.open		= split_open,
+	.read		= seq_read,
+	.write		= split_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+//============== PPSYNC_PORT =================================================
+
+extern u16 PPSYNC_PORT;
+
+static int port_show(struct seq_file *p, void *v)
+{
+	seq_printf(p, "%d\n", (int) ntohs(PPSYNC_PORT));
+	return 0;
+}
+
+static int port_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, port_show, NULL);
+}
+
+static ssize_t port_write(struct file *file, const char __user *ubuf,
+			  size_t size, loff_t *pos)
+{
+	char buf[101];
+	int len, port;
+
+	if (*pos > 0 || size > 100)
+		return -EFAULT;
+	if (copy_from_user(buf, ubuf, size))
+		return -EFAULT;
+	if (sscanf(buf, "%d", &port) != 1)
+		return -EFAULT;
+	if (port < 0)
+		return -EFAULT;
+
+	PPSYNC_PORT = htons((u16)port);
+
+	len = strlen(buf);
+	*pos = len;
+	return len;
+}
+
+static const struct file_operations port_ops = {
+	.open		= port_open,
+	.read		= seq_read,
+	.write		= port_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static int __init proc_stat_init(void)
 {
 	proc_create("stat", 0, NULL, &proc_stat_operations);
+	proc_create("split", 0666, NULL, &split_ops);
+	proc_create("port", 0666, NULL, &port_ops);
 	return 0;
 }
 fs_initcall(proc_stat_init);

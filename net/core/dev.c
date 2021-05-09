@@ -146,6 +146,11 @@
 
 #include "net-sysfs.h"
 
+int PPSYNC_SPLIT = 0;
+EXPORT_SYMBOL(PPSYNC_SPLIT);
+u16 PPSYNC_PORT = htons(9999);
+EXPORT_SYMBOL(PPSYNC_PORT);
+
 #define MAX_GRO_SKBS 8
 
 /* This should be increased if a protocol with a bigger head is added. */
@@ -5867,9 +5872,14 @@ static int process_backlog(struct napi_struct *napi, int quota)
 		struct sk_buff *skb;
 
 		while ((skb = __skb_dequeue(&sd->process_queue))) {
-			rcu_read_lock();
-			__netif_receive_skb(skb);
-			rcu_read_unlock();
+			// if (PPSYNC_SPLIT && skb->first_stage) {
+			// 	skb->first_stage = 0;
+			// 	napi_gro_receive(napi, skb);
+			// } else {
+				rcu_read_lock();
+				__netif_receive_skb(skb);
+				rcu_read_unlock();
+			// }
 			input_queue_head_incr(sd);
 			if (++work >= quota)
 				return work;
