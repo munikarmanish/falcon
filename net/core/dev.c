@@ -146,6 +146,11 @@
 
 #include "net-sysfs.h"
 
+int PPSYNC_SPLIT = 0;
+EXPORT_SYMBOL(PPSYNC_SPLIT);
+u16 PPSYNC_PORT = htons(0);
+EXPORT_SYMBOL(PPSYNC_PORT);
+
 #define MAX_GRO_SKBS 8
 
 /* This should be increased if a protocol with a bigger head is added. */
