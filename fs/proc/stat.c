@@ -242,14 +242,15 @@ static int split_open(struct inode *inode, struct file *file)
 static ssize_t split_write(struct file *file, const char __user *ubuf,
 			   size_t size, loff_t *pos)
 {
-	char buf[101];
+	char buf[101] = {0};
 	int len, split;
 
-	if (*pos > 0 || size > 100)
+	len = size;
+	if (len > 100)
 		return -EFAULT;
-	if (copy_from_user(buf, ubuf, size))
+	if (copy_from_user(buf, ubuf, len))
 		return -EFAULT;
-	if (sscanf(buf, "%d", &split) != 1)
+	if (kstrtoint(strim(buf), 10, &split))
 		return -EFAULT;
 	if (split < 0)
 		return -EFAULT;
@@ -257,7 +258,6 @@ static ssize_t split_write(struct file *file, const char __user *ubuf,
 	PPSYNC_SPLIT = split;
 
 	len = strlen(buf);
-	*pos = len;
 	return len;
 }
 
@@ -271,11 +271,19 @@ static const struct file_operations split_ops = {
 
 //============== PPSYNC_PORT =================================================
 
-extern u16 PPSYNC_PORT;
+extern u16 PPSYNC_PORTS[10];
+extern u16 N_PPSYNC_PORTS;
 
 static int port_show(struct seq_file *p, void *v)
 {
-	seq_printf(p, "%d\n", (int) ntohs(PPSYNC_PORT));
+	int i;
+
+	for (i = 0; i < N_PPSYNC_PORTS; i++) {
+		if (i > 0)
+			seq_puts(p, ", ");
+		seq_printf(p, "%u", PPSYNC_PORTS[i]);
+	}
+	seq_putc(p, '\n');
 	return 0;
 }
 
@@ -287,22 +295,31 @@ static int port_open(struct inode *inode, struct file *file)
 static ssize_t port_write(struct file *file, const char __user *ubuf,
 			  size_t size, loff_t *pos)
 {
-	char buf[101];
-	int len, port;
+	char buf[101] = {0}, *clean, *token;
+	int len, port, nports;
 
-	if (*pos > 0 || size > 100)
+	len = size;
+	if (len > 100)
 		return -EFAULT;
-	if (copy_from_user(buf, ubuf, size))
+	if (copy_from_user(buf, ubuf, len))
 		return -EFAULT;
-	if (sscanf(buf, "%d", &port) != 1)
-		return -EFAULT;
-	if (port < 0)
-		return -EFAULT;
+	clean = strim(buf);
 
-	PPSYNC_PORT = htons((u16)port);
+	nports = 0;
+	while ((token = strsep(&clean, ","))) {
+		if (kstrtoint(strim(token), 10, &port))
+			return -EFAULT;
+		if (port == 0) {
+			nports = 0;
+			break;
+		} else if (port < 0 || port > 65535) {
+			return -EFAULT;
+		} else {
+			PPSYNC_PORTS[nports++] = (u16) port;
+		}
+	}
+	N_PPSYNC_PORTS = (u16) nports;
 
-	len = strlen(buf);
-	*pos = len;
 	return len;
 }
 

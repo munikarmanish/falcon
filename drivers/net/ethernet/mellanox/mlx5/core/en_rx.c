@@ -51,44 +51,9 @@
 #include "en/health.h"
 
 extern int PPSYNC_SPLIT;
-extern u16 PPSYNC_PORT;
-
-u8 skb_is_high_priority(struct sk_buff *skb)
-{
-	struct iphdr *iph;
-	struct udphdr *udph;
-	struct tcphdr *tcph;
-	u16 PRIORITY_PORT = htons(9999);
-	u16 VXLAN_PORT = htons(4789);
-	u8 *cursor = skb->head;
-	u16 skb_mac_h_offset = skb->mac_header;
-	u16 skb_ip_h_offset = skb_mac_h_offset + 14;
-	cursor += skb_ip_h_offset;
-
-check_l3_and_l4:
-	iph = (struct iphdr *)cursor;
-	cursor += sizeof(*iph);
-	if (iph->protocol == IPPROTO_UDP) {
-		udph = (struct udphdr *)cursor;
-		if (udph->dest == PPSYNC_PORT) {
-			return 1;
-		} else if (udph->dest == VXLAN_PORT) {
-			cursor += (sizeof(*udph) + 8 + 14);
-			goto check_l3_and_l4;
-		} else {
-			return 0;
-		}
-	}
-	else if (iph->protocol == IPPROTO_TCP) {
-		tcph = (struct tcphdr *)cursor;
-		if (tcph->dest == PPSYNC_PORT)
-			return 1;
-		else
-			return 0;
-	}
-
-	return 0;
-}
+extern u16 N_PPSYNC_PORTS;
+extern u16 PPSYNC_PORTS[10];
+extern int skb_is_high_priority(const struct sk_buff*);
 
 static inline bool mlx5e_rx_hw_stamp(struct hwtstamp_config *config)
 {
